@@ -21,6 +21,8 @@ import {
 import { VideoClip } from '../types';
 import { captureVideoFrame } from '../utils/exportUtils';
 import { runObjectInsert, runObjectRemove, type SurgeryResult } from '../services/objectSurgery';
+import { ConnectProviderCard, readProviderKeyStatus } from './ConnectProviderCard';
+import { evaluateKeyGate, type KeyGateResult } from '../utils/providerGate';
 
 type Mode = 'remove' | 'insert';
 
@@ -57,6 +59,7 @@ export const ObjectSurgeryPanel: React.FC<ObjectSurgeryPanelProps> = ({
   const [outSec, setOutSec] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [keyGate, setKeyGate] = useState<KeyGateResult | null>(null);
 
   const win = clip ? clipActiveWindow(clip) : null;
   const surgeryOps = ops.filter(o => o.type === 'object-remove' || o.type === 'object-insert');
@@ -110,6 +113,11 @@ export const ObjectSurgeryPanel: React.FC<ObjectSurgeryPanelProps> = ({
     if (mode === 'remove' && !point) { setError('Click the object to remove on the extracted frame.'); return; }
     if (mode === 'insert' && !description.trim()) { setError('Describe the object to insert.'); return; }
     setError(null);
+
+    // Paid feature: without a key, show the Connect-provider card before any op is journaled.
+    const gate = evaluateKeyGate('object-surgery', readProviderKeyStatus());
+    if (!gate.ok) { setKeyGate(gate); return; }
+    setKeyGate(null);
 
     if (mode === 'remove') {
       const op = createObjectRemoveOp(clip.id, inSec, outSec, {
@@ -239,6 +247,14 @@ export const ObjectSurgeryPanel: React.FC<ObjectSurgeryPanelProps> = ({
         )}
 
         {error && <p className="text-[11px] text-red-500 bg-red-50 rounded-lg px-2.5 py-1.5">{error}</p>}
+
+        {keyGate && (
+          <ConnectProviderCard
+            gate={keyGate}
+            onResolved={run}
+            onDismiss={() => setKeyGate(null)}
+          />
+        )}
 
         {/* Applied surgery ops + A/B toggle */}
         {surgeryOps.length > 0 && (

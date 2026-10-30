@@ -16,6 +16,7 @@ import { resolveGradeAtTime, gradeToCssFilter } from './state/styleGrade';
 import { styleBibleToPromptContext } from './services/styleBible';
 import { ModelOverlay } from './components/ModelOverlay';
 import { createOverlayModelOp } from './utils/overlayModel';
+import { captureVideoFrame, getClipAtTime } from './utils/exportUtils';
 import { FileUploader } from './components/FileUploader';
 import { Timeline } from './components/Timeline';
 import { ClipEditor } from './components/ClipEditor';
@@ -358,6 +359,8 @@ export default function App() {
   const [showStyleBible, setShowStyleBible] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [showModelPanel, setShowModelPanel] = useState(false);
+  // Frame captured from the playhead when the 3D panel opens — the input for image-to-3D generation.
+  const [modelFrameDataUrl, setModelFrameDataUrl] = useState<string | null>(null);
   const [showSurgeryPanel, setShowSurgeryPanel] = useState(false);
   const [surgeryAb, setSurgeryAb] = useState<'source' | 'segment'>('source');
   const segmentVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -495,6 +498,14 @@ export default function App() {
     if (!res.ok) { console.error(`Demo audio fetch failed with ${res.status}`); return; }
     const blob = await res.blob();
     await handleVoiceoverUpload([new File([blob], 'syncro-demo.wav', { type: 'audio/wav' })]);
+  };
+
+  // Captures the frame image-to-3D generation will use when the 3D panel opens.
+  // A failed capture just clears the frame — generation stays unavailable rather than crashing.
+  const captureFrameForModel = (hit: { clip: VideoClip; localTime: number }) => {
+    captureVideoFrame(hit.clip, hit.localTime)
+      .then(setModelFrameDataUrl)
+      .catch(() => setModelFrameDataUrl(null));
   };
 
   const handleVoiceoverUpload = async (files: File[]) => {
@@ -689,7 +700,15 @@ export default function App() {
             <Activity className="w-3 h-3" /> Logs
           </button>
           <button
-            onClick={() => setShowModelPanel(true)}
+            onClick={() => {
+              const hit = getClipAtTime(editor.clips, currentTime);
+              if (hit) {
+                captureFrameForModel(hit);
+              } else {
+                setModelFrameDataUrl(null);
+              }
+              setShowModelPanel(true);
+            }}
             title="3D model editor"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors bg-gray-100 text-gray-500 hover:bg-gray-200"
           >
@@ -974,6 +993,7 @@ export default function App() {
       {showModelPanel && (
         <ModelPanel
           onClose={() => setShowModelPanel(false)}
+          frameDataUrl={modelFrameDataUrl}
           onPlace={(modelUrl, transform) => {
             // Place over the next 3s with a keyframed drift (right + slow yaw) —
             // the animation path is linearly interpolated by resolveModelPoseAt.

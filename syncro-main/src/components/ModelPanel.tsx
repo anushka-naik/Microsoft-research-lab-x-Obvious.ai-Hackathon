@@ -1,7 +1,7 @@
 // 3D model editor surface. three.js itself lives in modelViewer.ts and loads
 // through a dynamic import here, so the critical bundle never pays for it.
 import { useEffect, useRef, useState } from 'react';
-import { Box, Download, Loader2, Upload, X } from 'lucide-react';
+import { Box, Download, Loader2, Sparkles, Upload, X } from 'lucide-react';
 import {
   DEFAULT_MODEL_TRANSFORM,
   sanitizeTransform,
@@ -11,12 +11,17 @@ import {
 } from '../utils/modelTransform';
 import type { ViewerHandle } from './modelViewer';
 import { createDemoGlbUrl } from './modelCompositor';
+import { ConnectProviderCard, readProviderKeyStatus } from './ConnectProviderCard';
+import { evaluateKeyGate, type KeyGateResult } from '../utils/providerGate';
+import { generateModelFromImage } from '../services/providers';
 
 interface ModelPanelProps {
   onClose: () => void;
   /** Provider-generated GLB to open automatically (op pipeline wires this later). */
   glbUrl?: string | null;
   glbName?: string;
+  /** Frame captured from the playhead — the input for image-to-3D generation. */
+  frameDataUrl?: string | null;
   /** Place the currently loaded model onto the timeline as an overlay-model op. */
   onPlace?: (modelUrl: string, transform: ModelTransform) => void;
 }
@@ -62,7 +67,7 @@ function AxisSlider({
   );
 }
 
-export function ModelPanel({ onClose, glbUrl, glbName, onPlace }: ModelPanelProps) {
+export function ModelPanel({ onClose, glbUrl, glbName, frameDataUrl, onPlace }: ModelPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewerRef = useRef<ViewerHandle | null>(null);
   const [ready, setReady] = useState(false);
@@ -73,6 +78,8 @@ export function ModelPanel({ onClose, glbUrl, glbName, onPlace }: ModelPanelProp
   const [light, setLight] = useState(2.2);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(glbUrl ?? null);
   const [downloadName, setDownloadName] = useState(glbName ?? 'model.glb');
+  const [keyGate, setKeyGate] = useState<KeyGateResult | null>(null);
+  const [generating, setGenerating] = useState(false);
 
   // Boot the lazy viewer once on mount; dispose on close.
   useEffect(() => {
@@ -149,6 +156,24 @@ export function ModelPanel({ onClose, glbUrl, glbName, onPlace }: ModelPanelProp
     setError(null);
   };
 
+  /** Paid feature: image-to-3D via Meshy/Tripo — gated by the Connect-provider card. */
+  const handleGenerateFromFrame = async () => {
+    if (!frameDataUrl || generating) return;
+    const gate = evaluateKeyGate('image-to-3d', readProviderKeyStatus());
+    if (!gate.ok) { setKeyGate(gate); return; }
+    setKeyGate(null);
+    setGenerating(true);
+    setError(null);
+    try {
+      const result = await generateModelFromImage(frameDataUrl);
+      await loadFromUrl(result.modelUrl, `${result.provider}-model.glb`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '3D generation failed');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   const setPos = (axis: 0 | 1 | 2, v: number) =>
     setTransform((t) => sanitizeTransform({ ...t, position: setVec3At(t.position, axis, v) }));
   const setRot = (axis: 0 | 1 | 2, v: number) =>
@@ -192,7 +217,27 @@ export function ModelPanel({ onClose, glbUrl, glbName, onPlace }: ModelPanelProp
             </p>
           )}
 
+          {keyGate && (
+            <ConnectProviderCard
+              gate={keyGate}
+              onResolved={() => void handleGenerateFromFrame()}
+              onDismiss={() => setKeyGate(null)}
+            />
+          )}
+
           <div className="flex flex-wrap items-center gap-2">
+            {frameDataUrl && (
+              <button
+                onClick={() => void handleGenerateFromFrame()}
+                disabled={generating}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors"
+                title="Generate a 3D model from the frame captured at the playhead (needs a Meshy or Tripo key)"
+              >
+                {generating
+                  ? <><Loader2 className="w-3 h-3 animate-spin" /> Generating model…</>
+                  : <><Sparkles className="w-3 h-3" /> Generate from frame</>}
+              </button>
+            )}
             <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 cursor-pointer">
               <Upload className="w-3 h-3" /> Load GLB file
               <input
