@@ -521,7 +521,7 @@ export default function App() {
     const trimChanged = (updated.trimStart ?? 0) !== (current.trimStart ?? 0)
       || (updated.trimmedDuration ?? undefined) !== (current.trimmedDuration ?? undefined);
     if (trimChanged) {
-      dispatch({ type: 'commit-op', op: createTrimOp(updated.id, win.inSec, win.outSec, { trimStart: updated.trimStart ?? 0, trimmedDuration: updated.trimmedDuration }) });
+      dispatch({ type: 'commit-op', op: createTrimOp(updated.id, win.inSec, win.outSec, { trimStart: updated.trimStart ?? 0, trimmedDuration: updated.trimmedDuration, startTime: updated.startTime }) });
     }
     if ((updated.textOverlay ?? '') !== (current.textOverlay ?? '')) {
       dispatch({ type: 'commit-op', op: createTextOverlayOp(updated.id, win.inSec, win.outSec, { text: updated.textOverlay ?? '' }) });
@@ -713,8 +713,12 @@ export default function App() {
               {videoClips.length > 0 ? (() => {
                 // Per-frame compositing from the FrameInstruction: the active layer
                 // (with its transition opacity/wipe reveal) over the outgoing layer.
+                // Outside every clip window (before the first clip, past the last)
+                // show the nearest clip rather than a black frame — same as before ops.
+                const nearest = [...videoClips].sort((a, b) => b.startTime - a.startTime)[0];
+                const fallbackId = frame.clip ? undefined : nearest?.id;
                 return videoClips.map((clip) => {
-                  const isIncoming = frame.clip?.id === clip.id;
+                  const isIncoming = frame.clip?.id === clip.id || fallbackId === clip.id;
                   const isUnder = frame.underClip?.id === clip.id;
                   const isWipe = isIncoming && frame.transition?.type === 'wipe';
                   const style: React.CSSProperties = isIncoming || isUnder

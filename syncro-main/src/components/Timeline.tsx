@@ -238,7 +238,7 @@ export const Timeline: React.FC<TimelineProps> = ({
           || (before.trimStart ?? 0) !== (clip.trimStart ?? 0);
         if (trimmed) {
           const win = clipActiveWindow(clip);
-          onCommitOp(createTrimOp(clip.id, win.inSec, win.outSec, { trimStart: clip.trimStart ?? 0, trimmedDuration: clip.trimmedDuration }));
+          onCommitOp(createTrimOp(clip.id, win.inSec, win.outSec, { trimStart: clip.trimStart ?? 0, trimmedDuration: clip.trimmedDuration, startTime: clip.startTime }));
         }
       }
     };
@@ -298,7 +298,7 @@ export const Timeline: React.FC<TimelineProps> = ({
       const clip = videoClipsRef.current.find(c => c.id === drag.id);
       if (!clip) return;
       const win = clipActiveWindow(clip);
-      onCommitOp(createTrimOp(clip.id, win.inSec, win.outSec, { trimStart: clip.trimStart ?? 0, trimmedDuration: clip.trimmedDuration }));
+      onCommitOp(createTrimOp(clip.id, win.inSec, win.outSec, { trimStart: clip.trimStart ?? 0, trimmedDuration: clip.trimmedDuration, startTime: clip.startTime }));
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);

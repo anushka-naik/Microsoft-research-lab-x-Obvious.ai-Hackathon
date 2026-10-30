@@ -16,7 +16,7 @@ export const TRANSITION_DURATION_SEC = 0.5;
 export type EditOpStatus = 'draft' | 'applied' | 'failed';
 
 /** Seconds into the original source file a clip starts playing (0 = from the head). */
-export type TrimOpParams = { trimStart: number; trimmedDuration?: number };
+export type TrimOpParams = { trimStart: number; trimmedDuration?: number; startTime?: number };
 export type MoveOpParams = { startTime: number; track: number };
 export type TransitionOpParams = { transitionIn: TransitionType };
 export type TextOverlayOpParams = { text: string };
@@ -161,7 +161,9 @@ export function createTextOverlayOp(clipId: string, inSec: number, outSec: numbe
 
 /** A clip's playback window on the project timeline. */
 export function clipActiveWindow(clip: VideoClip): { inSec: number; outSec: number } {
-  const eff = clip.trimmedDuration ?? clip.duration;
+  // A left-trimmed clip without an explicit trimmedDuration still plays
+  // duration - trimStart of source, not its full source length.
+  const eff = clip.trimmedDuration ?? Math.max(0, clip.duration - (clip.trimStart ?? 0));
   return { inSec: clip.startTime, outSec: clip.startTime + eff };
 }
 
@@ -179,6 +181,8 @@ export function resolveClips(sourceClips: VideoClip[], ops: EditOp[]): VideoClip
         clips = clips.map(c => c.id === op.clipId
           ? {
               ...c,
+              // A left trim moves the clip's start edge on the timeline.
+              startTime: op.params.startTime ?? c.startTime,
               trimStart: op.params.trimStart > 0 ? op.params.trimStart : undefined,
               trimmedDuration: op.params.trimmedDuration,
             }
