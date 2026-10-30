@@ -139,6 +139,14 @@ export function effectiveClipDuration(clip: Pick<VideoClip, 'duration' | 'trimme
   return clip.trimmedDuration ?? clip.duration;
 }
 
+/** Last moment any clip is on the timeline (0 for an empty timeline). */
+export function timelineEnd(clips: VideoClip[]): number {
+  return clips.reduce(
+    (max, c) => Math.max(max, c.startTime + effectiveClipDuration(c)),
+    0,
+  );
+}
+
 export interface ClipLookupOptions {
   /** When true (default), times beyond the last clip wrap to the start — the export loop keeps footage under a longer voiceover. The live preview opts out and holds instead. */
   loop?: boolean;

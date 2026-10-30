@@ -23,7 +23,7 @@ import {
 import { VideoClip, Voiceover, CaptionStyle, CaptionMode, VideoDescription, ThumbnailCandidate } from '../types';
 import { generateDescription, identifyKeyMoments } from '../services/postProcessing';
 import { generateSRT, generateVTT, downloadTextFile, downloadBlob } from '../utils/captionUtils';
-import { captureVideoFrame, addQuoteOverlay, downloadDataUrl, downloadFile, getClipAtTime } from '../utils/exportUtils';
+import { captureVideoFrame, addQuoteOverlay, downloadDataUrl, downloadFile, getClipAtTime, timelineEnd } from '../utils/exportUtils';
 import { EditOp, applyOpsAtTime } from '../state/editOps';
 import type { StyleBible } from '../state/editOps';
 import { resolveGradeAtTime, gradeToCssFilter } from '../state/styleGrade';
@@ -660,7 +660,7 @@ function ExportTab({
   };
 
   const handleExportVideo = async () => {
-    if (!voiceover || videoClips.length === 0) return;
+    if (videoClips.length === 0) return;
     setIsExporting(true);
     setExportProgress(0);
 
@@ -686,25 +686,32 @@ function ExportTab({
         })
       ));
 
-      // Audio setup — preload fully before recording starts
-      const audioCtx = new AudioContext();
-      const audioEl = new Audio(voiceover.url);
-      audioEl.preload = 'auto';
-      await new Promise<void>((res, rej) => {
-        audioEl.addEventListener('canplaythrough', () => res(), { once: true });
-        audioEl.addEventListener('error', () => rej(new Error('Audio load failed')), { once: true });
-        audioEl.load();
-      });
-      const src = audioCtx.createMediaElementSource(audioEl);
-      const dest = audioCtx.createMediaStreamDestination();
-      src.connect(dest);
-      src.connect(audioCtx.destination);
+      // Audio setup — optional: a keyless timeline with no voiceover exports as
+      // a video-only recording. Preload fully before recording starts.
+      let audioEl: HTMLAudioElement | null = null;
+      let dest: MediaStreamAudioDestinationNode | null = null;
+      let audioTrimStart = 0;
+      if (voiceover) {
+        const audioCtx = new AudioContext();
+        audioEl = new Audio(voiceover.url);
+        audioEl.preload = 'auto';
+        await new Promise<void>((res, rej) => {
+          audioEl!.addEventListener('canplaythrough', () => res(), { once: true });
+          audioEl!.addEventListener('error', () => rej(new Error('Audio load failed')), { once: true });
+          audioEl!.load();
+        });
+        const src = audioCtx.createMediaElementSource(audioEl);
+        dest = audioCtx.createMediaStreamDestination();
+        src.connect(dest);
+        src.connect(audioCtx.destination);
+        audioTrimStart = voiceover.trimStart ?? 0;
+      }
 
-      // Build combined stream
+      // Build combined stream — video-only when there is no voiceover.
       const canvasStream = canvas.captureStream(30);
       const combined = new MediaStream([
         ...canvasStream.getTracks(),
-        ...dest.stream.getTracks(),
+        ...(dest ? dest.stream.getTracks() : []),
       ]);
 
       const { mimeType, ext, label } = pickMimeType();
@@ -721,11 +728,11 @@ function ExportTab({
         Object.values(renderVids).forEach(v => { v.pause(); v.remove(); });
       };
 
-      const audioTrimStart = voiceover.trimStart ?? 0;
-      const duration = (voiceover.trimEnd ?? voiceover.duration) - audioTrimStart;
+      // Export length: the voiceover when present, otherwise the timeline itself.
+      const duration = voiceover
+        ? (voiceover.trimEnd ?? voiceover.duration) - (voiceover.trimStart ?? 0)
+        : timelineEnd(videoClips);
       const startWall = performance.now();
-      const sorted = [...videoClips].sort((a, b) => a.startTime - b.startTime);
-      const totalClipDur = sorted.reduce((s, c) => s + c.duration, 0);
 
       // Pre-load 3D models for overlay-model ops — the draw loop is synchronous.
       let modelCompositor: CompositorHandle | null = null;
@@ -757,7 +764,7 @@ function ExportTab({
 
         if (elapsed >= duration) {
           recorder.stop();
-          audioEl.pause();
+          audioEl?.pause();
           cancelAnimationFrame(rafId);
           return;
         }
@@ -826,7 +833,7 @@ function ExportTab({
         }
 
         // Draw captions
-        if (captionsEnabled && voiceover.segments) {
+        if (captionsEnabled && voiceover?.segments) {
           const seg = voiceover.segments.find(s => elapsed >= s.start && elapsed <= s.end);
           if (seg) drawCaptionOnCanvas(ctx, W, H, seg.text, captionStyle);
         }
@@ -836,7 +843,7 @@ function ExportTab({
 
       stopRef.current = () => {
         recorder.stop();
-        audioEl.pause();
+        audioEl?.pause();
         cancelAnimationFrame(rafId);
         modelCompositor?.dispose();
         modelCompositor = null;
@@ -846,22 +853,19 @@ function ExportTab({
       };
 
       recorder.start(100);
-      audioEl.currentTime = audioTrimStart;
-      audioEl.play();
+      if (audioEl) {
+        audioEl.currentTime = audioTrimStart;
+        audioEl.play();
+      }
       rafId = requestAnimationFrame(draw);
-
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      void totalClipDur;
     } catch (e) {
       console.error('Export failed:', e);
       setIsExporting(false);
     }
   };
 
-  const hasContent = videoClips.length > 0 || !!voiceover;
-
-  if (!hasContent) {
-    return <LockedState message="Upload assets and run AI Auto-Align before exporting." />;
+  if (videoClips.length === 0) {
+    return <LockedState message="Import a clip to export — trim it, grade it, add 3D objects, then export. No API keys needed for any of it." />;
   }
 
   return (
@@ -945,7 +949,7 @@ function ExportTab({
       )}
 
       {/* Combined Video Export */}
-      {voiceover && videoClips.length > 0 && (
+      {videoClips.length > 0 && (
         <div className="space-y-3">
           <p className="text-xs font-bold uppercase tracking-widest text-violet-500">
             Combined Export
@@ -958,7 +962,7 @@ function ExportTab({
               <div>
                 <p className="text-sm font-semibold text-gray-900">Export Combined Video</p>
                 <p className="text-xs text-violet-500 mt-0.5">
-                  Records the aligned sequence with audio
+                  Records the timeline{voiceover ? ' with its voiceover' : ' (no voiceover yet — exports as video-only)'}
                   {captionsEnabled ? ' and burned-in captions' : ''}.
                   Saves as MP4 (H.264) when supported by your browser, otherwise WebM.
                 </p>
