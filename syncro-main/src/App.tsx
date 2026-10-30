@@ -12,12 +12,15 @@ import {
 import { resolveSegmentSplice } from './state/segmentSplice';
 import { ModelPanel } from './components/ModelPanel';
 import { ObjectSurgeryPanel } from './components/ObjectSurgeryPanel';
+import { resolveGradeAtTime, gradeToCssFilter } from './state/styleGrade';
+import { styleBibleToPromptContext } from './services/styleBible';
 import { FileUploader } from './components/FileUploader';
 import { Timeline } from './components/Timeline';
 import { ClipEditor } from './components/ClipEditor';
 import { VoiceoverEditor } from './components/VoiceoverEditor';
 import { PostProcessingPanel } from './components/PostProcessingPanel';
 import { LogPanel } from './components/LogPanel';
+import { StyleBiblePanel } from './components/StyleBiblePanel';
 import {
   analyzeVoiceover,
   analyzeVideo,
@@ -48,6 +51,7 @@ import {
   Undo2,
   Redo2,
   Wand2,
+  Palette,
 } from 'lucide-react';
 import { setApiKey, hasApiKey, getProviderKey, setProviderKey } from './services/apiKey';
 import {
@@ -308,6 +312,12 @@ export default function App() {
     () => applyOpsAtTime(videoClips, appliedOps, currentTime, { loop: false }),
     [videoClips, appliedOps, currentTime],
   );
+  // The preview and the export loop ask the SAME resolver the same question.
+  const activeGrade = useMemo(
+    () => resolveGradeAtTime(appliedOps, editor.styleBible, currentTime),
+    [appliedOps, editor.styleBible, currentTime],
+  );
+  const activeFilter = gradeToCssFilter(activeGrade);
 
   const [activeVideoId, setActiveVideoId] = useState<string | null>(null);
   const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
@@ -319,6 +329,7 @@ export default function App() {
   });
   const [onboardingStep, setOnboardingStep] = useState<1 | 2 | null>(1);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [showStyleBible, setShowStyleBible] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [showModelPanel, setShowModelPanel] = useState(false);
   const [showSurgeryPanel, setShowSurgeryPanel] = useState(false);
@@ -410,11 +421,29 @@ export default function App() {
     void segmentVideo.play().catch(() => { /* autoplay-blocked: the seek still shows the segment frame */ });
   }, [activeSplice]);
 
+  // MediaRecorder webm blobs report duration: Infinity at loadedmetadata (Chrome
+  // writes no duration header). Seeking to the far end once forces the browser
+  // to compute the real duration; a non-finite result poisons the Timeline's
+  // tick-mark construction (RangeError) and white-screens the app.
+  const readMediaDuration = (el: HTMLMediaElement): Promise<number> => {
+    return new Promise(resolve => {
+      el.onloadedmetadata = () => {
+        if (Number.isFinite(el.duration)) return resolve(el.duration);
+        el.currentTime = 1e101;
+        el.ontimeupdate = () => {
+          el.ontimeupdate = null;
+          resolve(Number.isFinite(el.duration) ? el.duration : 0);
+        };
+      };
+      el.onerror = () => resolve(0);
+    });
+  };
+
   const getVideoDuration = (url: string): Promise<number> =>
-    new Promise(resolve => { const v = document.createElement('video'); v.src = url; v.onloadedmetadata = () => resolve(v.duration); v.onerror = () => resolve(0); });
+    new Promise(resolve => { const v = document.createElement('video'); v.src = url; resolve(readMediaDuration(v)); });
 
   const getAudioDuration = (url: string): Promise<number> =>
-    new Promise(resolve => { const a = new Audio(url); a.onloadedmetadata = () => resolve(a.duration); a.onerror = () => resolve(0); });
+    new Promise(resolve => { const a = new Audio(url); resolve(readMediaDuration(a)); });
 
   const handleVideoUpload = async (files: File[]) => {
     const newClips: VideoClip[] = await Promise.all(files.map(async (file) => {
@@ -451,7 +480,7 @@ export default function App() {
     try {
       const updatedClips = await Promise.all(videoClips.map(async (clip) => {
         if (clip.analysis) return clip;
-        const analysis = await analyzeVideo(clip.file);
+        const analysis = await analyzeVideo(clip.file, editor.styleBible ? styleBibleToPromptContext(editor.styleBible) : undefined);
         return { ...clip, analysis };
       }));
       dispatch({ type: 'update-analysis', updates: updatedClips.map(c => ({ id: c.id, analysis: c.analysis ?? '' })) });
@@ -490,7 +519,7 @@ export default function App() {
       // Analyze any un-analyzed clips
       const updatedClips = await Promise.all(videoClips.map(async (clip): Promise<VideoClip> => {
         if (clip.analysis) return clip;
-        const analysis = await analyzeVideo(clip.file);
+        const analysis = await analyzeVideo(clip.file, editor.styleBible ? styleBibleToPromptContext(editor.styleBible) : undefined);
         return { ...clip, analysis };
       }));
       dispatch({ type: 'update-analysis', updates: updatedClips.map(c => ({ id: c.id, analysis: c.analysis ?? '' })) });
@@ -595,6 +624,16 @@ export default function App() {
             <Clock className="w-3 h-3" />
             {currentTime.toFixed(2)}s
           </div>
+          <button
+            onClick={() => setShowStyleBible(true)}
+            title="Style Bible — project-wide look"
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors',
+              editor.styleBible ? 'bg-violet-100 text-violet-600' : 'bg-gray-100 text-gray-500 hover:bg-gray-200',
+            )}
+          >
+            <Palette className="w-3 h-3" /> Style
+          </button>
           <button
             onClick={() => setShowLogs(v => !v)}
             className={cn(
@@ -773,6 +812,7 @@ export default function App() {
                         opacity: isIncoming ? frame.opacity : 1,
                         clipPath: isWipe ? `inset(0 ${(1 - (frame.transition?.progress ?? 0)) * 100}% 0 0)` : undefined,
                         pointerEvents: isIncoming ? 'auto' : 'none',
+                        filter: isIncoming && activeFilter ? activeFilter : undefined,
                       }
                     : { opacity: 0, pointerEvents: 'none' };
 
@@ -809,14 +849,30 @@ export default function App() {
             </div>
             {(() => {
               const textDraw = frame.drawOps.find(op => op.kind === 'text-overlay');
+              const typo = activeGrade?.overlayTypography;
               return textDraw?.kind === 'text-overlay' && textDraw.text ? (
                 <div className="absolute bottom-6 left-0 right-0 flex justify-center px-8 pointer-events-none">
-                  <span className="bg-black/60 backdrop-blur-sm text-white text-sm font-semibold px-5 py-2 rounded-xl max-w-lg text-center">
+                  <span
+                    className="bg-black/60 backdrop-blur-sm text-sm font-semibold px-5 py-2 rounded-xl max-w-lg text-center"
+                    style={{
+                      fontFamily: typo ? `${typo.font}, Inter, Arial, sans-serif` : undefined,
+                      fontWeight: typo?.weight,
+                      color: typo?.color,
+                      textShadow: typo?.shadow ? '0 1px 4px rgba(0,0,0,0.6)' : undefined,
+                    }}
+                  >
                     {textDraw.text}
                   </span>
                 </div>
               ) : null;
             })()}
+            {/* Vignette — the same grade value the export loop draws as a radial gradient */}
+            {activeGrade && activeGrade.grade.vignette > 0 && (
+              <div
+                className="absolute inset-0 pointer-events-none"
+                style={{ boxShadow: `inset 0 0 ${Math.round(activeGrade.grade.vignette * 180)}px rgba(0,0,0,${Math.min(0.9, activeGrade.grade.vignette)})` }}
+              />
+            )}
             {captionsEnabled && voiceover?.segments && (
               <CaptionOverlay segments={voiceover.segments} currentTime={currentTime} style={captionStyle} />
             )}
@@ -879,6 +935,16 @@ export default function App() {
         />
       )}
 
+      {/* Style Bible Modal */}
+      {showStyleBible && (
+        <StyleBiblePanel
+          bible={editor.styleBible}
+          videoClips={videoClips}
+          onApply={bible => dispatch({ type: 'set-style-bible', styleBible: bible })}
+          onClose={() => setShowStyleBible(false)}
+        />
+      )}
+
       {/* Export Modal */}
       <AnimatePresence>
         {showExportModal && (
@@ -906,6 +972,7 @@ export default function App() {
                   videoClips={videoClips}
                   ops={appliedOps}
                   currentTime={currentTime}
+                  styleBible={editor.styleBible}
                   captionStyle={captionStyle}
                   captionsEnabled={captionsEnabled}
                   onCaptionStyleChange={setCaptionStyle}

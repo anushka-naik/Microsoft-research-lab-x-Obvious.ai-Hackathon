@@ -25,6 +25,8 @@ import { generateDescription, identifyKeyMoments } from '../services/postProcess
 import { generateSRT, generateVTT, downloadTextFile, downloadBlob } from '../utils/captionUtils';
 import { captureVideoFrame, addQuoteOverlay, downloadDataUrl, downloadFile, getClipAtTime } from '../utils/exportUtils';
 import { EditOp, applyOpsAtTime } from '../state/editOps';
+import type { StyleBible } from '../state/editOps';
+import { resolveGradeAtTime, gradeToCssFilter } from '../state/styleGrade';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -623,12 +625,14 @@ function ExportTab({
   voiceover,
   videoClips,
   ops,
+  styleBible,
   captionStyle,
   captionsEnabled,
 }: {
   voiceover: Voiceover | null;
   videoClips: VideoClip[];
   ops: EditOp[];
+  styleBible: StyleBible | null;
   captionStyle: CaptionStyle;
   captionsEnabled: boolean;
 }) {
@@ -735,6 +739,9 @@ function ExportTab({
 
         // Compose this frame through the SAME op pipeline the preview uses.
         const frame = applyOpsAtTime(videoClips, ops, elapsed, { loop: false });
+        // The SAME grade resolver the preview uses — one spec, no drift.
+        const grade = resolveGradeAtTime(ops, styleBible, elapsed);
+        const gradeFilter = gradeToCssFilter(grade);
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 0, W, H);
 
@@ -755,6 +762,7 @@ function ExportTab({
             if (v.paused) v.play().catch(() => {});
             try {
               ctx.save();
+              ctx.filter = gradeFilter;
               if (wipe) {
                 const revealW = W * wipe.progress;
                 ctx.beginPath();
@@ -770,10 +778,13 @@ function ExportTab({
           }
         }
 
+        // Vignette — same grade value the preview draws as an inset box-shadow.
+        drawVignetteOnCanvas(ctx, W, H, grade?.grade.vignette ?? 0);
+
         // Burn journaled text-overlay ops — the export is no longer a lossy preview.
         for (const drawOp of frame.drawOps) {
           if (drawOp.kind === 'text-overlay' && drawOp.text) {
-            drawTextOverlayOnCanvas(ctx, W, H, drawOp.text);
+            drawTextOverlayOnCanvas(ctx, W, H, drawOp.text, grade?.overlayTypography);
           }
         }
 
@@ -995,13 +1006,17 @@ function drawTextOverlayOnCanvas(
   ctx: CanvasRenderingContext2D,
   W: number,
   H: number,
-  text: string
+  text: string,
+  typo?: StyleBible['overlayTypography']
 ) {
   const fontSize = Math.max(14, Math.round(W * 0.022));
   ctx.save();
-  ctx.font = `600 ${fontSize}px Inter, Arial, sans-serif`;
+  ctx.font = `${typo?.weight ?? 600} ${fontSize}px ${typo?.font ?? 'Inter'}, Arial, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+  if (typo?.shadow) ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+  if (typo?.shadow) ctx.shadowBlur = 6;
+  ctx.shadowOffsetY = typo?.shadow ? 2 : 0;
 
   const maxW = W * 0.75;
   const words = text.split(' ').filter(Boolean);
@@ -1037,10 +1052,24 @@ function drawTextOverlayOnCanvas(
   ctx.closePath();
   ctx.fill();
 
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = typo?.color ?? '#ffffff';
   lines.forEach((line, i) => {
     ctx.fillText(line, W / 2, boxTop + padY + lh * i + lh / 2, maxW);
   });
+  ctx.restore();
+}
+
+// ── Canvas vignette (radial gradient) — pairs with the preview's inset shadow ─
+function drawVignetteOnCanvas(ctx: CanvasRenderingContext2D, W: number, H: number, amount: number) {
+  if (amount <= 0) return;
+  const inner = Math.min(W, H) * 0.45;
+  const outer = Math.max(W, H) * 0.72;
+  const grad = ctx.createRadialGradient(W / 2, H / 2, inner, W / 2, H / 2, outer);
+  grad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+  grad.addColorStop(1, `rgba(0, 0, 0, ${Math.min(0.85, amount)})`);
+  ctx.save();
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
   ctx.restore();
 }
 
@@ -1099,6 +1128,7 @@ interface PostProcessingPanelProps {
   videoClips: VideoClip[];
   ops: EditOp[];
   currentTime: number;
+  styleBible: StyleBible | null;
   captionStyle: CaptionStyle;
   captionsEnabled: boolean;
   onCaptionStyleChange: (s: CaptionStyle) => void;
@@ -1109,6 +1139,7 @@ export function PostProcessingPanel({
   voiceover,
   videoClips,
   ops,
+  styleBible,
   captionStyle,
   captionsEnabled,
   onCaptionStyleChange,
@@ -1210,6 +1241,7 @@ export function PostProcessingPanel({
               voiceover={voiceover}
               videoClips={videoClips}
               ops={ops}
+              styleBible={styleBible}
               captionStyle={captionStyle}
               captionsEnabled={captionsEnabled}
             />

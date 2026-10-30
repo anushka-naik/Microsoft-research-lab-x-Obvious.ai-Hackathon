@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseStyleBible, serializeStyleBible } from './styleBible';
+import { parseStyleBible, serializeStyleBible, styleBibleToPromptContext } from './styleBible';
 import type { StyleBible } from '../state/editOps';
 
 const validBible: StyleBible = {
@@ -72,5 +72,22 @@ describe('serializeStyleBible', () => {
 
   it('produces valid JSON that parses back to the input', () => {
     expect(JSON.parse(serializeStyleBible(validBible))).toEqual(validBible);
+  });
+});
+
+describe('styleBibleToPromptContext', () => {
+  it('carries every dimension into the prompt block', () => {
+    const ctx = styleBibleToPromptContext(validBible);
+    expect(ctx).toContain('brightness 1.1');
+    expect(ctx).toContain('temperature 0.3');
+    expect(ctx).toContain('fade, dissolve');
+    expect(ctx).toContain('avgCutLengthSec'.replace('avgCutLengthSec', 'average cut 4'));
+    expect(ctx).toContain('weight 600');
+    expect(ctx).toContain('with drop shadow');
+  });
+
+  it('omits the shadow mention for shadowless typography', () => {
+    const flat = { ...validBible, overlayTypography: { ...validBible.overlayTypography, shadow: false } };
+    expect(styleBibleToPromptContext(flat)).not.toContain('shadow');
   });
 });

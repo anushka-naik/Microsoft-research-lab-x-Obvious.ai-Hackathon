@@ -99,3 +99,20 @@ export function parseStyleBible(raw: unknown): StyleBible | null {
 export function serializeStyleBible(bible: StyleBible): string {
   return JSON.stringify(bible, null, 2);
 }
+
+/**
+ * Serialize a Style Bible into the style-context block appended to Gemini
+ * analysis prompts, so every clip's AI pass writes descriptions consistent
+ * with the project look (transitions/pacing vocabulary, color temperature).
+ */
+export function styleBibleToPromptContext(bible: StyleBible): string {
+  const g = bible.grade;
+  return [
+    `STYLE BIBLE (all descriptions and suggestions must respect this look):`,
+    `- Grade: brightness ${g.brightness}, contrast ${g.contrast}, saturation ${g.saturation}, temperature ${g.temperature} (-1 cool … 1 warm), vignette ${g.vignette}.`,
+    `- Captions: ${bible.captions.font} ${bible.captions.fontSize}px, color ${bible.captions.color}, ${bible.captions.position}.`,
+    `- Transition vocabulary: ${bible.transitions.allowed.join(', ')}; default duration ${bible.transitions.defaultDurationSec}s.`,
+    `- Pacing: average cut ${bible.pacing.avgCutLengthSec}s, minimum cut ${bible.pacing.minCutLengthSec}s.`,
+    `- Overlay typography: weight ${bible.overlayTypography.weight} ${bible.overlayTypography.font} in ${bible.overlayTypography.color}${bible.overlayTypography.shadow ? ' with drop shadow' : ''}.`,
+  ].join('\n');
+}

@@ -195,7 +195,7 @@ export async function analyzeVoiceover(
   }
 }
 
-export async function analyzeVideo(videoFile: File): Promise<string> {
+export async function analyzeVideo(videoFile: File, styleContext?: string): Promise<string> {
   const MODEL = 'gemini-2.5-flash-lite';
   const log = startLog('Analyze Video', MODEL, videoFile.name);
   try {
@@ -206,7 +206,7 @@ export async function analyzeVideo(videoFile: File): Promise<string> {
       contents: {
         parts: [
           { fileData: { mimeType: videoFile.type, fileUri } },
-          { text: 'Describe the content of this video clip in detail. What is happening? What are the key visual elements?' },
+          { text: `Describe the content of this video clip in detail. What is happening? What are the key visual elements?${styleContext ? `\n\n${styleContext}` : ''}` },
         ],
       },
     });
