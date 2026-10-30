@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parseStyleBible, serializeStyleBible, styleBibleToPromptContext } from './styleBible';
 import type { StyleBible } from '../state/editOps';
+import { DEFAULT_STYLE_BIBLE } from '../state/editOps';
 
 const validBible: StyleBible = {
   grade: { brightness: 1.1, contrast: 1.05, saturation: 0.9, temperature: 0.3, vignette: 0.25 },
@@ -89,5 +90,11 @@ describe('styleBibleToPromptContext', () => {
   it('omits the shadow mention for shadowless typography', () => {
     const flat = { ...validBible, overlayTypography: { ...validBible.overlayTypography, shadow: false } };
     expect(styleBibleToPromptContext(flat)).not.toContain('shadow');
+  });
+
+  it('accepts the keyless default Style Bible — manual grading starts from a valid spec', () => {
+    const parsed = parseStyleBible(serializeStyleBible(DEFAULT_STYLE_BIBLE));
+    expect(parsed).not.toBeNull();
+    expect(parsed?.grade).toEqual({ brightness: 1, contrast: 1, saturation: 1, temperature: 0, vignette: 0 });
   });
 });

@@ -100,6 +100,16 @@ export interface StyleBible {
   };
 }
 
+// Neutral, keyless starting point: every field valid, so the grade sliders and
+// Apply work before any paid generation has happened.
+export const DEFAULT_STYLE_BIBLE: StyleBible = {
+  grade: { brightness: 1, contrast: 1, saturation: 1, temperature: 0, vignette: 0 },
+  captions: { font: 'Inter', fontSize: 16, color: '#ffffff', bg: 'rgba(0,0,0,0.5)', position: 'bottom', mode: 'lower-third' },
+  transitions: { allowed: ['cut', 'fade', 'dissolve', 'wipe'], defaultDurationSec: 0.5 },
+  pacing: { avgCutLengthSec: 2, minCutLengthSec: 0.5 },
+  overlayTypography: { font: 'Inter', weight: 600, color: '#ffffff', shadow: true },
+};
+
 // ── FrameInstructions — the single contract between the journal and pixels ──
 
 export type DrawOp =
