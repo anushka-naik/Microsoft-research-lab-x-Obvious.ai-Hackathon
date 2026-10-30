@@ -371,7 +371,9 @@ export default function App() {
     () => (surgeryAb === 'segment' ? resolveSegmentSplice(appliedOps, frame.clip?.id ?? null, currentTime) : null),
     [surgeryAb, appliedOps, frame.clip?.id, currentTime],
   );
-  const [showApiKeyModal, setShowApiKeyModal] = useState(!hasApiKey());
+  // Keyless-first: the key manager never auto-opens — it stays reachable from
+  // the header key control and the inline Connect-provider cards open instead.
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [meshyKeyInput, setMeshyKeyInput] = useState('');
   const [tripoKeyInput, setTripoKeyInput] = useState('');
