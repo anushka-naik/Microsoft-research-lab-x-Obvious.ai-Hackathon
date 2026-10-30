@@ -421,11 +421,29 @@ export default function App() {
     void segmentVideo.play().catch(() => { /* autoplay-blocked: the seek still shows the segment frame */ });
   }, [activeSplice]);
 
+  // MediaRecorder webm blobs report duration: Infinity at loadedmetadata (Chrome
+  // writes no duration header). Seeking to the far end once forces the browser
+  // to compute the real duration; a non-finite result poisons the Timeline's
+  // tick-mark construction (RangeError) and white-screens the app.
+  const readMediaDuration = (el: HTMLMediaElement): Promise<number> => {
+    return new Promise(resolve => {
+      el.onloadedmetadata = () => {
+        if (Number.isFinite(el.duration)) return resolve(el.duration);
+        el.currentTime = 1e101;
+        el.ontimeupdate = () => {
+          el.ontimeupdate = null;
+          resolve(Number.isFinite(el.duration) ? el.duration : 0);
+        };
+      };
+      el.onerror = () => resolve(0);
+    });
+  };
+
   const getVideoDuration = (url: string): Promise<number> =>
-    new Promise(resolve => { const v = document.createElement('video'); v.src = url; v.onloadedmetadata = () => resolve(v.duration); v.onerror = () => resolve(0); });
+    new Promise(resolve => { const v = document.createElement('video'); v.src = url; resolve(readMediaDuration(v)); });
 
   const getAudioDuration = (url: string): Promise<number> =>
-    new Promise(resolve => { const a = new Audio(url); a.onloadedmetadata = () => resolve(a.duration); a.onerror = () => resolve(0); });
+    new Promise(resolve => { const a = new Audio(url); resolve(readMediaDuration(a)); });
 
   const handleVideoUpload = async (files: File[]) => {
     const newClips: VideoClip[] = await Promise.all(files.map(async (file) => {
