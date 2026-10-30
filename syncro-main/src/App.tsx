@@ -324,6 +324,7 @@ export default function App() {
   const [tripoKeyInput, setTripoKeyInput] = useState('');
   const [falKeyInput, setFalKeyInput] = useState('');
   const [replicateKeyInput, setReplicateKeyInput] = useState('');
+  const [groqKeyInput, setGroqKeyInput] = useState('');
 
   // One save action persists every key field in the modal (Gemini, fal.ai,
   // Replicate, Meshy, Tripo); the meshy/tripo store treats empty as cleared.
@@ -331,6 +332,7 @@ export default function App() {
     if (apiKeyInput.trim()) setApiKey(apiKeyInput.trim());
     if (falKeyInput.trim()) setProviderKey('fal', falKeyInput);
     if (replicateKeyInput.trim()) setProviderKey('replicate', replicateKeyInput);
+    if (groqKeyInput.trim()) setProviderKey('groq', groqKeyInput);
     setMeshyApiKey(meshyKeyInput);
     setTripoApiKey(tripoKeyInput);
     setShowApiKeyModal(false);
@@ -344,6 +346,7 @@ export default function App() {
     if (showApiKeyModal) {
       setFalKeyInput(getProviderKey('fal'));
       setReplicateKeyInput(getProviderKey('replicate'));
+      setGroqKeyInput(getProviderKey('groq'));
       setMeshyKeyInput(getMeshyApiKey());
       setTripoKeyInput(getTripoApiKey());
     }
@@ -885,6 +888,9 @@ export default function App() {
                 fal.ai (optional) powers object removal — get one from{' '}
                 <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noreferrer"
                   className="text-violet-600 hover:underline font-medium">fal.ai/dashboard/keys</a>.
+                Groq (optional) is the free LLM fallback when no Gemini key is set — free key at{' '}
+                <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer"
+                  className="text-violet-600 hover:underline font-medium">console.groq.com</a>.
               </p>
               <input
                 type="password"
@@ -911,6 +917,14 @@ export default function App() {
                 placeholder="Replicate token (optional) — r8_…"
                 className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent mb-4 font-mono"
               />
+              <input
+                type="password"
+                value={groqKeyInput}
+                onChange={e => setGroqKeyInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && apiKeyInput.trim()) saveApiKeys(); }}
+                placeholder="Groq key (optional, free) — gsk_…"
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent mb-4 font-mono"
+              />
               <div className="flex gap-3">
                 {hasApiKey() && (
                   <button
@@ -922,7 +936,7 @@ export default function App() {
                 )}
                 <button
                   onClick={saveApiKeys}
-                  disabled={!apiKeyInput.trim() && !falKeyInput.trim() && !replicateKeyInput.trim() && !meshyKeyInput.trim() && !tripoKeyInput.trim()}
+                  disabled={!apiKeyInput.trim() && !falKeyInput.trim() && !replicateKeyInput.trim() && !groqKeyInput.trim() && !meshyKeyInput.trim() && !tripoKeyInput.trim()}
                   className="flex-1 px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 disabled:bg-gray-200 disabled:text-gray-400 text-white text-sm font-semibold transition-colors shadow shadow-violet-200"
                 >
                   Save Keys
