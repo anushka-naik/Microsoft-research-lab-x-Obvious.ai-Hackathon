@@ -28,8 +28,8 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
-      - name: Tests (vitest run)
-        run: npx vitest run
+      - name: Tests (vitest run, JUnit report)
+        run: npx vitest run --reporter=junit --outputFile=./test-results/junit.xml
 
       - name: Lint (tsc --noEmit)
         run: npm run lint
@@ -39,3 +39,22 @@ jobs:
 
       - name: Build (vite build)
         run: npm run build
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-junit-report
+          path: syncro-main/test-results/junit.xml
+          if-no-files-found: error
+
+      - name: Run summary
+        if: always()
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ## CI summary
+          - Steps: vitest (JUnit report uploaded as `vitest-junit-report`), lint, typecheck, build.
+          - **Branch protection recommendation:** require the `Test, lint, typecheck, build` check as a
+            status check on `main` (Settings → Branches → Branch protection rules → Require status checks
+            to pass), so no PR merges without independent verification.
+          EOF
