@@ -45,6 +45,14 @@ import {
   Redo2,
 } from 'lucide-react';
 import { setApiKey, hasApiKey } from './services/apiKey';
+import {
+  getMeshyApiKey,
+  hasMeshyApiKey,
+  hasTripoApiKey,
+  setMeshyApiKey,
+  setTripoApiKey,
+  getTripoApiKey,
+} from './services/providers/apiKeys';
 import { motion, AnimatePresence } from 'motion/react';
 
 function cn(...classes: (string | boolean | undefined | null)[]): string {
@@ -309,6 +317,8 @@ export default function App() {
   const [showLogs, setShowLogs] = useState(false);
   const [showApiKeyModal, setShowApiKeyModal] = useState(!hasApiKey());
   const [apiKeyInput, setApiKeyInput] = useState('');
+  const [meshyKeyInput, setMeshyKeyInput] = useState('');
+  const [tripoKeyInput, setTripoKeyInput] = useState('');
   const videoRefs = useRef<Record<string, HTMLVideoElement>>({});
   const [previewHeight, setPreviewHeight] = useState(260);
   const isResizingPreview = useRef(false);
@@ -540,7 +550,7 @@ export default function App() {
             <Activity className="w-3 h-3" /> Logs
           </button>
           <button
-            onClick={() => { setApiKeyInput(''); setShowApiKeyModal(true); }}
+            onClick={() => { setApiKeyInput(''); setMeshyKeyInput(getMeshyApiKey()); setTripoKeyInput(getTripoApiKey()); setShowApiKeyModal(true); }}
             title={hasApiKey() ? 'Change Gemini API key' : 'Set Gemini API key (required)'}
             className={cn(
               'p-2 rounded-full transition-colors',
@@ -862,6 +872,40 @@ export default function App() {
                   className="flex-1 px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 disabled:bg-gray-200 disabled:text-gray-400 text-white text-sm font-semibold transition-colors shadow shadow-violet-200"
                 >
                   Save Key
+                </button>
+              </div>
+
+              <div className="mt-6 pt-5 border-t border-gray-100">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-1">Image → 3D providers</h3>
+                <p className="text-xs text-gray-400 mb-3">
+                  Optional — used by the frame-to-3D feature. Meshy is preferred; Tripo is the fallback. Get keys from{' '}
+                  <a href="https://www.meshy.ai" target="_blank" rel="noreferrer" className="text-violet-600 hover:underline font-medium">meshy.ai</a>
+                  {' '}or{' '}
+                  <a href="https://www.tripo3d.ai" target="_blank" rel="noreferrer" className="text-violet-600 hover:underline font-medium">tripo3d.ai</a>.
+                </p>
+                <div className="space-y-2 mb-4">
+                  <input
+                    type="password"
+                    value={meshyKeyInput}
+                    onChange={e => setMeshyKeyInput(e.target.value)}
+                    placeholder={hasMeshyApiKey() ? 'Meshy API key — saved (edit to replace, clear to remove)'
+                      : 'Meshy API key (preferred)'}
+                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent font-mono"
+                  />
+                  <input
+                    type="password"
+                    value={tripoKeyInput}
+                    onChange={e => setTripoKeyInput(e.target.value)}
+                    placeholder={hasTripoApiKey() ? 'Tripo API key — saved (edit to replace, clear to remove)'
+                      : 'Tripo API key (fallback)'}
+                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent font-mono"
+                  />
+                </div>
+                <button
+                  onClick={() => { setMeshyApiKey(meshyKeyInput); setTripoApiKey(tripoKeyInput); setShowApiKeyModal(false); }}
+                  className="w-full px-4 py-2.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm font-semibold transition-colors"
+                >
+                  Save provider keys
                 </button>
               </div>
             </motion.div>
