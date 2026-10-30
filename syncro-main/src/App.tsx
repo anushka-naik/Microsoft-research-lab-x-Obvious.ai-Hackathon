@@ -496,7 +496,7 @@ export default function App() {
     const trimChanged = (updated.trimStart ?? 0) !== (current.trimStart ?? 0)
       || (updated.trimmedDuration ?? undefined) !== (current.trimmedDuration ?? undefined);
     if (trimChanged) {
-      dispatch({ type: 'commit-op', op: createTrimOp(updated.id, win.inSec, win.outSec, { trimStart: updated.trimStart ?? 0, trimmedDuration: updated.trimmedDuration }) });
+      dispatch({ type: 'commit-op', op: createTrimOp(updated.id, win.inSec, win.outSec, { trimStart: updated.trimStart ?? 0, trimmedDuration: updated.trimmedDuration, startTime: updated.startTime }) });
     }
     if ((updated.textOverlay ?? '') !== (current.textOverlay ?? '')) {
       dispatch({ type: 'commit-op', op: createTextOverlayOp(updated.id, win.inSec, win.outSec, { text: updated.textOverlay ?? '' }) });

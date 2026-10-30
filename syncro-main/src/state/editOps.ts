@@ -15,8 +15,10 @@ export const TRANSITION_DURATION_SEC = 0.5;
 
 export type EditOpStatus = 'draft' | 'applied' | 'failed';
 
-/** Seconds into the original source file a clip starts playing (0 = from the head). */
-export type TrimOpParams = { trimStart: number; trimmedDuration?: number };
+/** Seconds into the original source file a clip starts playing (0 = from the head).
+ *  `startTime` is the clip's absolute timeline start: left-trim drags shift it, and
+ *  the op must carry it or replay snaps the clip back to its pre-drag position. */
+export type TrimOpParams = { trimStart: number; trimmedDuration?: number; startTime?: number };
 export type MoveOpParams = { startTime: number; track: number };
 export type TransitionOpParams = { transitionIn: TransitionType };
 export type TextOverlayOpParams = { text: string };
@@ -181,6 +183,7 @@ export function resolveClips(sourceClips: VideoClip[], ops: EditOp[]): VideoClip
               ...c,
               trimStart: op.params.trimStart > 0 ? op.params.trimStart : undefined,
               trimmedDuration: op.params.trimmedDuration,
+              startTime: op.params.startTime ?? c.startTime,
             }
           : c);
         break;

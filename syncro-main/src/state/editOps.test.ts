@@ -69,6 +69,23 @@ describe('resolveClips', () => {
     expect(resolved[0].trimStart).toBeUndefined();
     expect(resolved[0].trimmedDuration).toBeUndefined();
   });
+
+  it('replays the timeline shift a left-trim carries in startTime (regression: trim ops omitting the shift snapped clips back)', () => {
+    const source = makeClip({ startTime: 5 });
+    const win = clipActiveWindow(source);
+    // Left-trim drag as the UI commits it: head shortened, start shifted right by 1.5s.
+    const resolved = resolveClips([source], [createTrimOp(source.id, 6.5, 10, { trimStart: 1.5, trimmedDuration: 3.5, startTime: 6.5 })]);
+    expect(resolved[0].startTime).toBe(6.5);
+    expect(resolved[0].trimStart).toBe(1.5);
+    expect(resolved[0].trimmedDuration).toBe(3.5);
+  });
+
+  it('leaves startTime untouched when a trim op omits it (older journals stay valid)', () => {
+    const source = makeClip({ startTime: 5 });
+    const win = clipActiveWindow(source);
+    const resolved = resolveClips([source], [createTrimOp(source.id, win.inSec, win.outSec, { trimStart: 2, trimmedDuration: 5 })]);
+    expect(resolved[0].startTime).toBe(5);
+  });
 });
 
 describe('applyOpsAtTime', () => {
