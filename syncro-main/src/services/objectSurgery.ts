@@ -123,12 +123,24 @@ export async function cutSubclip(clip: VideoClip, srcStart: number, srcEnd: numb
   const height = video.videoHeight;
   if (!width || !height) throw new Error(`Could not read dimensions of "${clip.name}"`);
 
-  return recordCanvas(
-    ctx => { ctx.drawImage(video, 0, 0, width, height); },
-    srcEnd - srcStart,
-    width,
-    height,
-  );
+  // The draw callback paints the video's current frame each tick — the video must
+  // actually play, or recordCanvas captures one seeked frame for the whole window.
+  try {
+    await video.play();
+  } catch (err) {
+    video.pause();
+    throw new Error(`Could not play "${clip.name}" for segment cutting: ${String(err)}`);
+  }
+  try {
+    return await recordCanvas(
+      ctx => { ctx.drawImage(video, 0, 0, width, height); },
+      srcEnd - srcStart,
+      width,
+      height,
+    );
+  } finally {
+    video.pause();
+  }
 }
 
 /** Normalizes a mask image to pure black/white pixels (SAM2 output safety). */

@@ -849,6 +849,9 @@ export default function App() {
                 />
               )}
             </div>
+            {/* 3D models sit under text overlays — the same stack the export loop
+                paints (footage → models → vignette → text). */}
+            <ModelOverlay drawOps={frame.drawOps} ops={editor.ops} currentTime={currentTime} />
             {(() => {
               const textDraw = frame.drawOps.find(op => op.kind === 'text-overlay');
               const typo = activeGrade?.overlayTypography;
@@ -868,7 +871,6 @@ export default function App() {
                 </div>
               ) : null;
             })()}
-            <ModelOverlay drawOps={frame.drawOps} ops={editor.ops} currentTime={currentTime} />
             {/* Vignette — the same grade value the export loop draws as a radial gradient.
                 Painted after ModelOverlay so placed models are graded by the Style Bible. */}
             {activeGrade && activeGrade.grade.vignette > 0 && (
