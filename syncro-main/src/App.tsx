@@ -9,6 +9,7 @@ import {
   editorReducer,
   initialEditorState,
 } from './state/editOps';
+import { ModelPanel } from './components/ModelPanel';
 import { FileUploader } from './components/FileUploader';
 import { Timeline } from './components/Timeline';
 import { ClipEditor } from './components/ClipEditor';
@@ -40,6 +41,7 @@ import {
   ArrowRight,
   CheckCircle2,
   Activity,
+  Box,
   Key,
   Undo2,
   Redo2,
@@ -315,6 +317,7 @@ export default function App() {
   const [onboardingStep, setOnboardingStep] = useState<1 | 2 | null>(1);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
+  const [showModelPanel, setShowModelPanel] = useState(false);
   const [showApiKeyModal, setShowApiKeyModal] = useState(!hasApiKey());
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [meshyKeyInput, setMeshyKeyInput] = useState('');
@@ -575,6 +578,13 @@ export default function App() {
             <Activity className="w-3 h-3" /> Logs
           </button>
           <button
+            onClick={() => setShowModelPanel(true)}
+            title="3D model editor"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors bg-gray-100 text-gray-500 hover:bg-gray-200"
+          >
+            <Box className="w-3 h-3" /> 3D Model
+          </button>
+          <button
             onClick={() => { setApiKeyInput(''); setShowApiKeyModal(true); }}
             title={hasApiKey() ? 'Change API keys' : 'Set API keys'}
             className={cn(
@@ -804,6 +814,7 @@ export default function App() {
       )}
 
       {showLogs && <LogPanel onClose={() => setShowLogs(false)} />}
+      {showModelPanel && <ModelPanel onClose={() => setShowModelPanel(false)} />}
 
       {/* Export Modal */}
       <AnimatePresence>
