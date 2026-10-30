@@ -9,7 +9,9 @@ import {
   editorReducer,
   initialEditorState,
 } from './state/editOps';
+import { resolveSegmentSplice } from './state/segmentSplice';
 import { ModelPanel } from './components/ModelPanel';
+import { ObjectSurgeryPanel } from './components/ObjectSurgeryPanel';
 import { FileUploader } from './components/FileUploader';
 import { Timeline } from './components/Timeline';
 import { ClipEditor } from './components/ClipEditor';
@@ -45,6 +47,7 @@ import {
   Key,
   Undo2,
   Redo2,
+  Wand2,
 } from 'lucide-react';
 import { setApiKey, hasApiKey, getProviderKey, setProviderKey } from './services/apiKey';
 import {
@@ -318,6 +321,16 @@ export default function App() {
   const [showExportModal, setShowExportModal] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [showModelPanel, setShowModelPanel] = useState(false);
+  const [showSurgeryPanel, setShowSurgeryPanel] = useState(false);
+  const [surgeryAb, setSurgeryAb] = useState<'source' | 'segment'>('source');
+  const segmentVideoRef = useRef<HTMLVideoElement | null>(null);
+  // A/B preview: the pre-rendered segment replaces the source inside its window
+  // while the toggle is on "Segment"; outside every window this is null and the
+  // untouched source shows through.
+  const activeSplice = useMemo(
+    () => (surgeryAb === 'segment' ? resolveSegmentSplice(appliedOps, frame.clip?.id ?? null, currentTime) : null),
+    [surgeryAb, appliedOps, frame.clip?.id, currentTime],
+  );
   const [showApiKeyModal, setShowApiKeyModal] = useState(!hasApiKey());
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [meshyKeyInput, setMeshyKeyInput] = useState('');
@@ -385,6 +398,17 @@ export default function App() {
     const lastVideo = videoRefs.current[last.id];
     if (lastVideo) lastVideo.currentTime = last.duration;
   }, [frame, videoClips]);
+
+  // Keep the segment layer frame-synced while the A/B toggle shows it.
+  useEffect(() => {
+    const segmentVideo = segmentVideoRef.current;
+    if (!segmentVideo) return;
+    if (!activeSplice) { segmentVideo.pause(); return; }
+    if (Math.abs(segmentVideo.currentTime - activeSplice.segmentTime) > 0.15) {
+      segmentVideo.currentTime = activeSplice.segmentTime;
+    }
+    void segmentVideo.play().catch(() => { /* autoplay-blocked: the seek still shows the segment frame */ });
+  }, [activeSplice]);
 
   const getVideoDuration = (url: string): Promise<number> =>
     new Promise(resolve => { const v = document.createElement('video'); v.src = url; v.onloadedmetadata = () => resolve(v.duration); v.onerror = () => resolve(0); });
@@ -588,6 +612,16 @@ export default function App() {
             <Box className="w-3 h-3" /> 3D Model
           </button>
           <button
+            onClick={() => setShowSurgeryPanel(v => !v)}
+            title="Object removal and insertion"
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors',
+              showSurgeryPanel ? 'bg-violet-100 text-violet-600' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+            )}
+          >
+            <Wand2 className="w-3 h-3" /> Objects
+          </button>
+          <button
             onClick={() => { setApiKeyInput(''); setShowApiKeyModal(true); }}
             title={hasApiKey() ? 'Change API keys' : 'Set API keys'}
             className={cn(
@@ -762,6 +796,16 @@ export default function App() {
                   <p className="text-gray-500 text-sm">Upload videos to get started</p>
                 </div>
               )}
+              {surgeryAb === 'segment' && activeSplice && (
+                <video
+                  key={activeSplice.opId}
+                  ref={segmentVideoRef}
+                  src={activeSplice.resultUrl}
+                  muted
+                  playsInline
+                  className="absolute inset-0 w-full h-full object-contain z-10"
+                />
+              )}
             </div>
             {(() => {
               const textDraw = frame.drawOps.find(op => op.kind === 'text-overlay');
@@ -822,6 +866,18 @@ export default function App() {
 
       {showLogs && <LogPanel onClose={() => setShowLogs(false)} />}
       {showModelPanel && <ModelPanel onClose={() => setShowModelPanel(false)} />}
+      {showSurgeryPanel && (
+        <ObjectSurgeryPanel
+          clip={frame.clip}
+          sourceOffset={frame.sourceOffset}
+          currentTime={currentTime}
+          ops={appliedOps}
+          dispatch={dispatch}
+          abMode={surgeryAb}
+          onAbModeChange={setSurgeryAb}
+          onClose={() => setShowSurgeryPanel(false)}
+        />
+      )}
 
       {/* Export Modal */}
       <AnimatePresence>
