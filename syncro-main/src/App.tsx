@@ -595,7 +595,7 @@ export default function App() {
   const editingClip = videoClips.find(c => c.id === editingClipId) ?? null;
 
   return (
-    <div className="min-h-screen bg-[#F5F5F7] text-gray-900 font-sans">
+    <div className="min-h-screen bg-app-base text-gray-900 font-sans">
       <AnimatePresence>
         {onboardingStep !== null && (
           <OnboardingModal
