@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import WaveSurfer from 'wavesurfer.js';
 import { VideoClip, Voiceover, TransitionType } from '../types';
-import { Play, Pause, Scissors, Wand2, Video, Plus, Zap, Layers, Star, Trash2 } from 'lucide-react';
+import { EditOp, clipActiveWindow, createMoveOp, createTrimOp, createTransitionOp } from '../state/editOps';
+import { Play, Pause, Scissors, Wand2, Video, Plus, Zap, Layers, Star, Trash2, Undo2, Redo2 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -12,7 +13,13 @@ function cn(...inputs: ClassValue[]) {
 interface TimelineProps {
   voiceover: Voiceover | null;
   videoClips: VideoClip[];
-  onVideoClipChange: (clips: VideoClip[]) => void;
+  // Transient updates during drags bypass the journal; the gesture ends in a commit-op.
+  onClipsTransient: (clips: VideoClip[]) => void;
+  onCommitOp: (op: EditOp) => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
   onVoiceoverChange?: (voiceover: Voiceover) => void;
   onAutoAlign: () => void;
   onSwapClip?: (clipId: string, altId: string) => void;
@@ -55,7 +62,12 @@ const TRACK_LABEL_W = 36;
 export const Timeline: React.FC<TimelineProps> = ({
   voiceover,
   videoClips,
-  onVideoClipChange,
+  onClipsTransient,
+  onCommitOp,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
   onAutoAlign,
   onSwapClip,
   onDeleteClip,
@@ -204,9 +216,32 @@ export const Timeline: React.FC<TimelineProps> = ({
         const currentMax = Math.max(1, ...videoClipsRef.current.map(c => c.track ?? 0));
         targetTrack = Math.max(0, Math.min(currentMax + 1, Math.floor(relY / TRACK_ROW_H)));
       }
-      onVideoClipChange(videoClipsRef.current.map(c => c.id === drag.id ? { ...c, startTime: newStart, track: targetTrack } : c));
+      onClipsTransient(videoClipsRef.current.map(c => c.id === drag.id ? { ...c, startTime: newStart, track: targetTrack } : c));
     };
-    const onUp = () => { clipDragRef.current = null; setDraggingClipId(null); onVideoClipChange(resolveOverlaps(videoClipsRef.current)); };
+    const onUp = () => {
+      const drag = clipDragRef.current;
+      clipDragRef.current = null;
+      setDraggingClipId(null);
+      if (!drag) return;
+      const finalClips = resolveOverlaps(videoClipsRef.current);
+      const dragged = finalClips.find(c => c.id === drag.id);
+      if (dragged) {
+        const win = clipActiveWindow(dragged);
+        onCommitOp(createMoveOp(dragged.id, win.inSec, win.outSec, { startTime: dragged.startTime, track: dragged.track ?? 0 }));
+      }
+      // Overlap resolution may have clipped neighbors — journal those trims too.
+      for (const clip of finalClips) {
+        if (clip.id === drag.id) continue;
+        const before = videoClipsRef.current.find(c => c.id === clip.id);
+        if (!before) continue;
+        const trimmed = (before.trimmedDuration ?? undefined) !== (clip.trimmedDuration ?? undefined)
+          || (before.trimStart ?? 0) !== (clip.trimStart ?? 0);
+        if (trimmed) {
+          const win = clipActiveWindow(clip);
+          onCommitOp(createTrimOp(clip.id, win.inSec, win.outSec, { trimStart: clip.trimStart ?? 0, trimmedDuration: clip.trimmedDuration }));
+        }
+      }
+    };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
@@ -245,7 +280,7 @@ export const Timeline: React.FC<TimelineProps> = ({
       const drag = trimDragRef.current;
       if (!drag) return;
       const deltaSec = (e.clientX - drag.startMouseX) / pixelsPerSecond;
-      onVideoClipChange(videoClipsRef.current.map((c: VideoClip) => {
+      onClipsTransient(videoClipsRef.current.map((c: VideoClip) => {
         if (c.id !== drag.id) return c;
         if (drag.side === 'right') {
           return { ...c, trimmedDuration: Math.max(0.5, Math.min(drag.origTrimmedDuration + deltaSec, drag.origDuration - drag.origTrimStart)) };
@@ -255,7 +290,16 @@ export const Timeline: React.FC<TimelineProps> = ({
         }
       }));
     };
-    const onUp = () => { trimDragRef.current = null; setDraggingTrimId(null); };
+    const onUp = () => {
+      const drag = trimDragRef.current;
+      trimDragRef.current = null;
+      setDraggingTrimId(null);
+      if (!drag) return;
+      const clip = videoClipsRef.current.find(c => c.id === drag.id);
+      if (!clip) return;
+      const win = clipActiveWindow(clip);
+      onCommitOp(createTrimOp(clip.id, win.inSec, win.outSec, { trimStart: clip.trimStart ?? 0, trimmedDuration: clip.trimmedDuration }));
+    };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
@@ -279,7 +323,11 @@ export const Timeline: React.FC<TimelineProps> = ({
     setIsDraggingVoiceover(true);
   };
   const handleTransitionChange = (clipId: string, type: TransitionType) => {
-    onVideoClipChange(videoClips.map(c => c.id === clipId ? { ...c, transitionIn: type } : c));
+    const clip = videoClips.find(c => c.id === clipId);
+    if (clip) {
+      const win = clipActiveWindow(clip);
+      onCommitOp(createTransitionOp(clipId, win.inSec, win.outSec, { transitionIn: type }));
+    }
     setTransitionPopoverId(null);
   };
 
@@ -292,6 +340,22 @@ export const Timeline: React.FC<TimelineProps> = ({
         <div className="flex items-center gap-3">
           <button onClick={togglePlay} className="p-2 rounded-full bg-violet-600 text-white hover:bg-violet-500 transition-colors">
             {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+          </button>
+          <button
+            onClick={onUndo}
+            disabled={!canUndo}
+            title="Undo"
+            className="p-2 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            <Undo2 className="w-4 h-4" />
+          </button>
+          <button
+            onClick={onRedo}
+            disabled={!canRedo}
+            title="Redo"
+            className="p-2 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            <Redo2 className="w-4 h-4" />
           </button>
           <span className="text-xs font-mono text-gray-400">{currentTime.toFixed(2)}s / {totalDuration.toFixed(2)}s</span>
           <div className="w-px h-4 bg-gray-200" />

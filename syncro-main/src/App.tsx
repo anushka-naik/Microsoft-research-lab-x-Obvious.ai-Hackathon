@@ -1,5 +1,14 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useReducer, useCallback } from 'react';
 import { VideoClip, Voiceover, CaptionStyle } from './types';
+import {
+  EditOp,
+  applyOpsAtTime,
+  clipActiveWindow,
+  createTextOverlayOp,
+  createTrimOp,
+  editorReducer,
+  initialEditorState,
+} from './state/editOps';
 import { FileUploader } from './components/FileUploader';
 import { Timeline } from './components/Timeline';
 import { ClipEditor } from './components/ClipEditor';
@@ -32,6 +41,8 @@ import {
   CheckCircle2,
   Activity,
   Key,
+  Undo2,
+  Redo2,
 } from 'lucide-react';
 import { setApiKey, hasApiKey } from './services/apiKey';
 import { motion, AnimatePresence } from 'motion/react';
@@ -269,10 +280,22 @@ function OnboardingModal({
 }
 
 export default function App() {
-  const [videoClips, setVideoClips] = useState<VideoClip[]>([]);
+  const [editor, dispatch] = useReducer(editorReducer, initialEditorState);
   const [voiceover, setVoiceover] = useState<Voiceover | null>(null);
   const [isAligning, setIsAligning] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+
+  // Applied ops (journal prefix) + the resolved read model every consumer renders.
+  const appliedOps = useMemo(() => editor.ops.slice(0, editor.historyIndex), [editor.ops, editor.historyIndex]);
+  const videoClips = editor.clips;
+  const canUndo = editor.historyIndex > 0;
+  const canRedo = editor.historyIndex < editor.ops.length;
+  // The preview consumes the SAME FrameInstruction the export loop renders.
+  const frame = useMemo(
+    () => applyOpsAtTime(videoClips, appliedOps, currentTime, { loop: false }),
+    [videoClips, appliedOps, currentTime],
+  );
+
   const [activeVideoId, setActiveVideoId] = useState<string | null>(null);
   const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
   const [editingClipId, setEditingClipId] = useState<string | null>(null);
@@ -305,26 +328,22 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const sorted = [...videoClips].sort((a, b) => b.startTime - a.startTime);
-    const activeClip = sorted.find((clip) => {
-      const end = clip.startTime + (clip.trimmedDuration ?? clip.duration);
-      return currentTime >= clip.startTime && currentTime < end;
-    });
-    if (activeClip) {
-      setActiveVideoId(activeClip.id);
-      const video = videoRefs.current[activeClip.id];
+    if (frame.clip) {
+      setActiveVideoId(frame.clip.id);
+      const video = videoRefs.current[frame.clip.id];
       if (video) {
-        const relativeTime = (currentTime - activeClip.startTime) + (activeClip.trimStart ?? 0);
-        if (Math.abs(video.currentTime - relativeTime) > 0.1) video.currentTime = relativeTime;
+        // frame.sourceOffset already points into the source file (trim applied).
+        if (Math.abs(video.currentTime - frame.sourceOffset) > 0.1) video.currentTime = frame.sourceOffset;
       }
       return;
     }
+    const sorted = [...videoClips].sort((a, b) => b.startTime - a.startTime);
     const last = sorted[sorted.length - 1];
     if (!last) return;
     setActiveVideoId(last.id);
     const lastVideo = videoRefs.current[last.id];
     if (lastVideo) lastVideo.currentTime = last.duration;
-  }, [currentTime, videoClips]);
+  }, [frame, videoClips]);
 
   const getVideoDuration = (url: string): Promise<number> =>
     new Promise(resolve => { const v = document.createElement('video'); v.src = url; v.onloadedmetadata = () => resolve(v.duration); v.onerror = () => resolve(0); });
@@ -338,7 +357,7 @@ export default function App() {
       const duration = await getVideoDuration(url);
       return { id: Math.random().toString(36).substr(2, 9), file, url, duration, startTime: 0, name: file.name };
     }));
-    setVideoClips(prev => [...prev, ...newClips]);
+    dispatch({ type: 'add-clips', clips: newClips });
   };
 
   const handleVoiceoverUpload = async (files: File[]) => {
@@ -370,7 +389,7 @@ export default function App() {
         const analysis = await analyzeVideo(clip.file);
         return { ...clip, analysis };
       }));
-      setVideoClips(updatedClips);
+      dispatch({ type: 'update-analysis', updates: updatedClips.map(c => ({ id: c.id, analysis: c.analysis ?? '' })) });
       const result = await generateNarrationFromVideos(
         updatedClips.map(c => ({ name: c.name, analysis: c.analysis ?? '', duration: c.duration })), voice
       );
@@ -409,7 +428,7 @@ export default function App() {
         const analysis = await analyzeVideo(clip.file);
         return { ...clip, analysis };
       }));
-      setVideoClips(updatedClips);
+      dispatch({ type: 'update-analysis', updates: updatedClips.map(c => ({ id: c.id, analysis: c.analysis ?? '' })) });
 
       // Get the AI-suggested play order with per-position alternatives
       const entries: AlignmentEntry[] = await suggestAlignment(
@@ -431,7 +450,7 @@ export default function App() {
       const includedIds = new Set(entries.map(e => e.id));
       updatedClips.forEach(c => { if (!includedIds.has(c.id)) orderedClips.push({ ...c, alternatives: [] }); });
 
-      setVideoClips(chainClips(orderedClips));
+      dispatch({ type: 'set-clips', clips: chainClips(orderedClips) });
     } catch (error) {
       console.error('Alignment failed:', error);
       alert('Failed to align clips. Please try again.');
@@ -443,25 +462,39 @@ export default function App() {
   const removeVideo = (id: string) => {
     const clip = videoClips.find(c => c.id === id);
     if (clip) URL.revokeObjectURL(clip.url);
-    setVideoClips(videoClips.filter(c => c.id !== id));
+    dispatch({ type: 'set-clips', clips: videoClips.filter(c => c.id !== id) });
   };
 
   // Swap a clip with one of its alternatives on the timeline (preserves chainClips order)
   const handleSwapClip = (clipId: string, altId: string) => {
-    setVideoClips(prev => {
-      const sorted = [...prev].sort((a, b) => a.startTime - b.startTime);
-      const idxA = sorted.findIndex(c => c.id === clipId);
-      const idxB = sorted.findIndex(c => c.id === altId);
-      if (idxA === -1 || idxB === -1) return prev;
-      // Swap the two clips in the ordered array, keeping each clip's alternatives
-      const tmp = sorted[idxA];
-      sorted[idxA] = { ...sorted[idxB], alternatives: tmp.alternatives };
-      sorted[idxB] = { ...tmp, alternatives: sorted[idxA].alternatives };
-      return chainClips(sorted);
-    });
+    const sorted = [...videoClips].sort((a, b) => a.startTime - b.startTime);
+    const idxA = sorted.findIndex(c => c.id === clipId);
+    const idxB = sorted.findIndex(c => c.id === altId);
+    if (idxA === -1 || idxB === -1) return;
+    // Swap the two clips in the ordered array, keeping each clip's alternatives
+    const tmp = sorted[idxA];
+    sorted[idxA] = { ...sorted[idxB], alternatives: tmp.alternatives };
+    sorted[idxB] = { ...tmp, alternatives: sorted[idxA].alternatives };
+    dispatch({ type: 'set-clips', clips: chainClips(sorted) });
   };
 
-  const handleClipEdit = (updated: VideoClip) => setVideoClips(prev => prev.map(c => c.id === updated.id ? updated : c));
+  // ClipEditor saves via ops: trim + text-overlay, journaled only when they actually changed.
+  const handleClipEdit = (updated: VideoClip) => {
+    const current = videoClips.find(c => c.id === updated.id);
+    if (!current) return;
+    const win = clipActiveWindow(current);
+    const trimChanged = (updated.trimStart ?? 0) !== (current.trimStart ?? 0)
+      || (updated.trimmedDuration ?? undefined) !== (current.trimmedDuration ?? undefined);
+    if (trimChanged) {
+      dispatch({ type: 'commit-op', op: createTrimOp(updated.id, win.inSec, win.outSec, { trimStart: updated.trimStart ?? 0, trimmedDuration: updated.trimmedDuration }) });
+    }
+    if ((updated.textOverlay ?? '') !== (current.textOverlay ?? '')) {
+      dispatch({ type: 'commit-op', op: createTextOverlayOp(updated.id, win.inSec, win.outSec, { text: updated.textOverlay ?? '' }) });
+    }
+  };
+
+  const handleClipsTransient = useCallback((clips: VideoClip[]) => dispatch({ type: 'transient-clips', clips }), []);
+  const handleCommitOp = useCallback((op: EditOp) => dispatch({ type: 'commit-op', op }), []);
   const handleOnboardingNext = () => { if (onboardingStep === 1) setOnboardingStep(2); else setOnboardingStep(null); };
   const editingClip = videoClips.find(c => c.id === editingClipId) ?? null;
 
@@ -643,33 +676,19 @@ export default function App() {
           <section className="bg-gray-900 rounded-2xl overflow-hidden relative shadow-xl border border-gray-200" style={{ height: previewHeight }}>
             <div className="absolute inset-0 flex items-center justify-center">
               {videoClips.length > 0 ? (() => {
-                const sorted = [...videoClips].sort((a, b) => a.startTime - b.startTime);
-                const TRANS_DUR = 0.5;
+                // Per-frame compositing from the FrameInstruction: the active layer
+                // (with its transition opacity/wipe reveal) over the outgoing layer.
                 return videoClips.map((clip) => {
-                  const isActive = activeVideoId === clip.id;
-                  const idx = sorted.findIndex(c => c.id === clip.id);
-                  const next = sorted[idx + 1];
-                  const transIn = clip.transitionIn ?? 'cut';
-                  const nextTransIn = next?.transitionIn ?? 'cut';
-                  const isWipe = transIn === 'wipe';
-
-                  // choose transition duration based on which way this clip is moving
-                  const movingDur = isActive
-                    ? (transIn !== 'cut' ? `${TRANS_DUR * 1000}ms` : '0ms')
-                    : (nextTransIn !== 'cut' ? `${TRANS_DUR * 1000}ms` : '0ms');
-
-                  const style: React.CSSProperties = isWipe
+                  const isIncoming = frame.clip?.id === clip.id;
+                  const isUnder = frame.underClip?.id === clip.id;
+                  const isWipe = isIncoming && frame.transition?.type === 'wipe';
+                  const style: React.CSSProperties = isIncoming || isUnder
                     ? {
-                        opacity: 1,
-                        clipPath: isActive ? 'inset(0 0% 0 0)' : 'inset(0 100% 0 0)',
-                        transition: `clip-path ${movingDur} ease`,
-                        pointerEvents: isActive ? 'auto' : 'none',
+                        opacity: isIncoming ? frame.opacity : 1,
+                        clipPath: isWipe ? `inset(0 ${(1 - (frame.transition?.progress ?? 0)) * 100}% 0 0)` : undefined,
+                        pointerEvents: isIncoming ? 'auto' : 'none',
                       }
-                    : {
-                        opacity: isActive ? 1 : 0,
-                        transition: `opacity ${movingDur} ease`,
-                        pointerEvents: isActive ? 'auto' : 'none',
-                      };
+                    : { opacity: 0, pointerEvents: 'none' };
 
                   return (
                     <video
@@ -692,12 +711,12 @@ export default function App() {
                 </div>
               )}
             </div>
-            {activeVideoId && (() => {
-              const activeClip = videoClips.find(c => c.id === activeVideoId);
-              return activeClip?.textOverlay ? (
+            {(() => {
+              const textDraw = frame.drawOps.find(op => op.kind === 'text-overlay');
+              return textDraw?.kind === 'text-overlay' && textDraw.text ? (
                 <div className="absolute bottom-6 left-0 right-0 flex justify-center px-8 pointer-events-none">
                   <span className="bg-black/60 backdrop-blur-sm text-white text-sm font-semibold px-5 py-2 rounded-xl max-w-lg text-center">
-                    {activeClip.textOverlay}
+                    {textDraw.text}
                   </span>
                 </div>
               ) : null;
@@ -729,7 +748,12 @@ export default function App() {
             voiceover={voiceover}
             onVoiceoverChange={setVoiceover}
             videoClips={videoClips}
-            onVideoClipChange={setVideoClips}
+            onClipsTransient={handleClipsTransient}
+            onCommitOp={handleCommitOp}
+            onUndo={() => dispatch({ type: 'undo' })}
+            onRedo={() => dispatch({ type: 'redo' })}
+            canUndo={canUndo}
+            canRedo={canRedo}
             onAutoAlign={handleAutoAlign}
             onSwapClip={handleSwapClip}
             onDeleteClip={removeVideo}
@@ -771,6 +795,7 @@ export default function App() {
                 <PostProcessingPanel
                   voiceover={voiceover}
                   videoClips={videoClips}
+                  ops={appliedOps}
                   currentTime={currentTime}
                   captionStyle={captionStyle}
                   captionsEnabled={captionsEnabled}

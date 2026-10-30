@@ -1,6 +1,8 @@
 import { GoogleGenAI, Type, FileState } from "@google/genai";
 import { startLog, finishLog } from "./logger";
 import { getApiKey } from "./apiKey";
+import { parseStyleBible } from "./styleBible";
+import type { StyleBible } from "../state/editOps";
 
 function getAI() {
   const apiKey = getApiKey();
@@ -287,6 +289,114 @@ Return a JSON array with one object per position, each containing:
     const entries: AlignmentEntry[] = JSON.parse(response.text || '[]');
     finishLog(log);
     return entries;
+  } catch (err: any) {
+    finishLog(log, err?.message ?? String(err));
+    throw err;
+  }
+
+}
+
+/**
+ * Generate the project Style Bible from a text description, optionally
+ * grounded in a reference clip's visual style ("match this reference" = same
+ * flow with the file attached). Validated through parseStyleBible — a
+ * structurally invalid response throws so the UI can offer a retry.
+ */
+export async function generateStyleBible(description: string, referenceFile?: File): Promise<StyleBible> {
+  const MODEL = 'gemini-2.5-flash-lite';
+  const context = referenceFile ? ` | reference: ${referenceFile.name}` : '';
+  const log = startLog('Generate Style Bible', MODEL, `"${description.slice(0, 80)}${description.length > 80 ? '…' : ''}"${context}`);
+  try {
+    const parts: Array<{ text: string } | { fileData: { mimeType: string; fileUri: string } }> = [];
+    if (referenceFile) {
+      const fileUri = await getFileUri(referenceFile);
+      parts.push({ fileData: { mimeType: referenceFile.type, fileUri } });
+    }
+    parts.push({ text: `You are a colorist and video style director. Create a Style Bible: a single JSON spec every clip in the project must follow, so exports look consistent.
+
+${referenceFile
+  ? 'A reference clip is attached — derive the visual style (color temperature, contrast, mood, pacing) from it first, then honor the written request where it adds detail.'
+  : 'No reference clip attached — work from the written description alone.'}
+
+Style request: """${description || 'A clean, modern, slightly cinematic look.'}"""
+
+Field semantics (respect these exactly):
+- grade.brightness/contrast/saturation: multipliers, 1 = neutral (usable range 0-2).
+- grade.temperature: -1 (cool/blue) to 1 (warm/orange), 0 = neutral.
+- grade.vignette: 0 (none) to 1 (heavy), drawn as a radial darkening.
+- captions: burned-in caption typography defaults.
+- transitions.allowed: subset of cut, fade, dissolve, wipe; defaultDurationSec in seconds (0-5).
+- pacing: avgCutLengthSec and minCutLengthSec in seconds (avgCut >= minCut).
+- overlayTypography: font/weight/color for text overlays; shadow adds a drop shadow.` });
+
+    const response = await getAI().models.generateContent({
+      model: MODEL,
+      contents: { parts },
+      config: {
+        temperature: 0.4,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            grade: {
+              type: Type.OBJECT,
+              properties: {
+                brightness: { type: Type.NUMBER },
+                contrast: { type: Type.NUMBER },
+                saturation: { type: Type.NUMBER },
+                temperature: { type: Type.NUMBER },
+                vignette: { type: Type.NUMBER },
+              },
+              required: ['brightness', 'contrast', 'saturation', 'temperature', 'vignette'],
+            },
+            captions: {
+              type: Type.OBJECT,
+              properties: {
+                font: { type: Type.STRING },
+                fontSize: { type: Type.NUMBER },
+                color: { type: Type.STRING },
+                bg: { type: Type.STRING },
+                position: { type: Type.STRING, enum: ['bottom', 'top'] },
+                mode: { type: Type.STRING, enum: ['lower-third', 'word-highlight', 'speaker-labeled'] },
+              },
+              required: ['font', 'fontSize', 'color', 'bg', 'position', 'mode'],
+            },
+            transitions: {
+              type: Type.OBJECT,
+              properties: {
+                allowed: { type: Type.ARRAY, items: { type: Type.STRING, enum: ['cut', 'fade', 'dissolve', 'wipe'] } },
+                defaultDurationSec: { type: Type.NUMBER },
+              },
+              required: ['allowed', 'defaultDurationSec'],
+            },
+            pacing: {
+              type: Type.OBJECT,
+              properties: {
+                avgCutLengthSec: { type: Type.NUMBER },
+                minCutLengthSec: { type: Type.NUMBER },
+              },
+              required: ['avgCutLengthSec', 'minCutLengthSec'],
+            },
+            overlayTypography: {
+              type: Type.OBJECT,
+              properties: {
+                font: { type: Type.STRING },
+                weight: { type: Type.NUMBER },
+                color: { type: Type.STRING },
+                shadow: { type: Type.BOOLEAN },
+              },
+              required: ['font', 'weight', 'color', 'shadow'],
+            },
+          },
+          required: ['grade', 'captions', 'transitions', 'pacing', 'overlayTypography'],
+        },
+      },
+    });
+
+    const bible = parseStyleBible(response.text || '');
+    if (!bible) throw new Error('Model returned an invalid Style Bible — try again or adjust the description.');
+    finishLog(log);
+    return bible;
   } catch (err: any) {
     finishLog(log, err?.message ?? String(err));
     throw err;
