@@ -1057,7 +1057,7 @@ export default function App() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 40 }}
               transition={{ type: 'spring', damping: 30, stiffness: 350 }}
-              className="relative h-full max-h-screen w-full max-w-xl bg-[#F5F5F7] border-l border-gray-200 shadow-2xl overflow-y-auto"
+              className="relative h-full max-h-screen w-full max-w-xl bg-panel border-l border-gray-200 shadow-2xl overflow-y-auto"
               onClick={e => e.stopPropagation()}
             >
               <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 bg-white/80 backdrop-blur-xl border-b border-gray-200">
