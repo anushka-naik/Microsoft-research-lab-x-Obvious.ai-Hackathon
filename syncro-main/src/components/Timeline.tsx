@@ -27,6 +27,8 @@ interface TimelineProps {
   isAligning: boolean;
   currentTime: number;
   onTimeUpdate: (time: number) => void;
+  /** Rendered centered over the empty track area when there is nothing to edit. */
+  emptyActions?: React.ReactNode;
 }
 
 interface ClipDragState {
@@ -75,6 +77,7 @@ export const Timeline: React.FC<TimelineProps> = ({
   currentTime,
   onTimeUpdate,
   onVoiceoverChange,
+  emptyActions,
 }) => {
   const waveformRef = useRef<HTMLDivElement>(null);
   const wavesurfer = useRef<WaveSurfer | null>(null);
@@ -383,6 +386,18 @@ export const Timeline: React.FC<TimelineProps> = ({
         style={{ minHeight: `${28 + 16 + 80 + 16 + numTracks * TRACK_ROW_H + 16}px` }}
         onClick={handleTrackClick}
       >
+        {videoClips.length === 0 && !voiceover && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+            <div
+              className="text-center pointer-events-auto bg-white/90 backdrop-blur-sm rounded-2xl border border-gray-200 shadow-sm px-8 py-6"
+              onClick={e => e.stopPropagation()}
+            >
+              <p className="text-sm font-medium text-gray-700">Nothing here yet — add a clip to start editing</p>
+              <p className="text-xs text-gray-400 mt-1">Import from the left panel, drop files onto the timeline, or try the demo clip.</p>
+              {emptyActions && <div className="mt-4 flex items-center justify-center gap-2">{emptyActions}</div>}
+            </div>
+          </div>
+        )}
         <div style={{ width: `${TRACK_PADDING + (totalDuration + 5) * pixelsPerSecond}px`, minWidth: '100%', padding: '8px 32px 16px 0' }}>
 
           {/* Time Ruler */}
@@ -478,8 +493,8 @@ export const Timeline: React.FC<TimelineProps> = ({
                               </div>
 
                               <div className="flex items-center gap-2 overflow-hidden">
-                                <Video className="w-3.5 h-3.5 shrink-0" style={{ color: isActive ? 'white' : '#7c3aed' }} />
-                                <span className="text-xs font-medium truncate" style={{ color: isActive ? 'white' : '#5b21b6' }}>{clip.name}</span>
+                                <Video className="w-3.5 h-3.5 shrink-0" style={{ color: isActive ? 'white' : 'var(--color-accent-hover)' }} />
+                                <span className="text-xs font-medium truncate" style={{ color: isActive ? 'white' : 'var(--color-ink-secondary)' }}>{clip.name}</span>
                               </div>
                               {(clip.trimmedDuration !== undefined || clip.trimStart !== undefined) && (
                                 <div className="flex items-center gap-1 mt-0.5">

@@ -1,8 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { X, Palette, Sparkles, Trash2, Loader2 } from 'lucide-react';
+import { X, Palette, Sparkles, Trash2, Loader2, Sliders } from 'lucide-react';
 import type { VideoClip } from '../types';
 import type { StyleBible } from '../state/editOps';
+import { DEFAULT_STYLE_BIBLE } from '../state/editOps';
 import { generateStyleBible } from '../services/gemini';
+import { ConnectProviderCard, readProviderKeyStatus } from './ConnectProviderCard';
+import { evaluateKeyGate, type KeyGateResult } from '../utils/providerGate';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Style Bible panel — generate the project look from a prompt (optionally
@@ -44,6 +47,7 @@ export const StyleBiblePanel: React.FC<StyleBiblePanelProps> = ({ bible, videoCl
   const [editing, setEditing] = useState<StyleBible | null>(bible);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [keyGate, setKeyGate] = useState<KeyGateResult | null>(null);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -52,6 +56,10 @@ export const StyleBiblePanel: React.FC<StyleBiblePanelProps> = ({ bible, videoCl
   }, [onClose]);
 
   const handleGenerate = async () => {
+    // Paid feature: without a key, show the Connect-provider card instead of a dead error.
+    const gate = evaluateKeyGate('style-bible', readProviderKeyStatus());
+    if (!gate.ok) { setKeyGate(gate); return; }
+    setKeyGate(null);
     setIsGenerating(true);
     setError(null);
     try {
@@ -120,6 +128,13 @@ export const StyleBiblePanel: React.FC<StyleBiblePanelProps> = ({ bible, videoCl
                 ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating…</>
                 : <><Sparkles className="w-3.5 h-3.5" /> Generate Style Bible</>}
             </button>
+            {keyGate && (
+              <ConnectProviderCard
+                gate={keyGate}
+                onResolved={() => void handleGenerate()}
+                onDismiss={() => setKeyGate(null)}
+              />
+            )}
             {error && <p className="text-xs text-red-500">{error}</p>}
           </div>
 
@@ -137,6 +152,15 @@ export const StyleBiblePanel: React.FC<StyleBiblePanelProps> = ({ bible, videoCl
             <p className="text-xs text-zinc-400 border-t border-zinc-100 pt-4">
               No Style Bible applied. Generate one from a prompt{videoClips.length > 0 ? ' or from a reference clip' : ''} to give the whole project a consistent look.
             </p>
+          )}
+          {!editing && (
+            <button
+              onClick={() => setEditing(DEFAULT_STYLE_BIBLE)}
+              className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold bg-zinc-100 text-zinc-600 hover:bg-zinc-200 rounded-xl transition-colors"
+            >
+              <Sliders className="w-3.5 h-3.5" />
+              Grade manually (no key needed)
+            </button>
           )}
         </div>
 

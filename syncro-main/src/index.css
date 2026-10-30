@@ -39,6 +39,12 @@
   --color-gray-800: #0f0b17; /* (bg use) darkest tile — text remapped below */
   --color-gray-900: #0f0b17; /* (bg use) video preview backdrop — text remapped below */
 
+  /* Accent tints (violet-50/100/200 are selected/hover surfaces and chip
+     backgrounds — default Tailwind values are near-white and glare on dark). */
+  --color-violet-50: #241c3d;
+  --color-violet-100: #2e2450;
+  --color-violet-200: #3a2e63;
+
   --color-zinc-50: #261e39;
   --color-zinc-100: #2c2440;
   --color-zinc-200: #352b4d;
@@ -48,6 +54,14 @@
   --color-zinc-600: #a99fc4;
   --color-zinc-700: #c3bad9;
   --color-zinc-800: #d8d1ea;
+
+  /* Status tints — light-surface defaults (emerald-200 fill, red-50/amber-50
+     chips) glare on dark panels; remapped to dark tints of the same hue. */
+  --color-emerald-200: #12352b;
+  --color-red-50: #361b26;
+  --color-red-100: #462330;
+  --color-amber-50: #362c15;
+  --color-amber-200: #55441f;
 
   /* Semantic tokens for new work. */
   --color-app-base: #141019;

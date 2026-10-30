@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { VideoClip } from '../types';
-import { effectiveClipDuration, getClipAtTime } from './exportUtils';
+import { effectiveClipDuration, getClipAtTime, timelineEnd } from './exportUtils';
 
 function makeClip(overrides: Partial<VideoClip> = {}): VideoClip {
   return {
@@ -66,5 +66,22 @@ describe('getClipAtTime (trim-aware lookup)', () => {
   it('loop: false returns null past the end instead of wrapping', () => {
     const clip = makeClip({ duration: 5 });
     expect(getClipAtTime([clip], 7, { loop: false })).toBeNull();
+  });
+});
+
+describe('timelineEnd', () => {
+  it('is 0 for an empty timeline', () => {
+    expect(timelineEnd([])).toBe(0);
+  });
+
+  it('ends at startTime + effective duration, trim-aware', () => {
+    const clip = makeClip({ startTime: 3, duration: 10, trimmedDuration: 4, trimStart: 1 });
+    expect(timelineEnd([clip])).toBe(7);
+  });
+
+  it('is the max end across clips, not the last clip', () => {
+    const early = makeClip({ id: 'early', startTime: 0, duration: 12 });
+    const late = makeClip({ id: 'late', startTime: 2, duration: 5 });
+    expect(timelineEnd([late, early])).toBe(12);
   });
 });

@@ -16,6 +16,7 @@ import { resolveGradeAtTime, gradeToCssFilter } from './state/styleGrade';
 import { styleBibleToPromptContext } from './services/styleBible';
 import { ModelOverlay } from './components/ModelOverlay';
 import { createOverlayModelOp } from './utils/overlayModel';
+import { captureVideoFrame, getClipAtTime } from './utils/exportUtils';
 import { FileUploader } from './components/FileUploader';
 import { Timeline } from './components/Timeline';
 import { ClipEditor } from './components/ClipEditor';
@@ -54,6 +55,7 @@ import {
   Redo2,
   Wand2,
   Palette,
+  PlayCircle,
 } from 'lucide-react';
 import { setApiKey, hasApiKey, getProviderKey, setProviderKey } from './services/apiKey';
 import {
@@ -134,7 +136,7 @@ type VoiceoverMethod = 'upload' | 'script' | 'auto';
 
 function OnboardingModal({
   step, onStepComplete, onVideoUpload, videoClips, onVoiceoverUpload,
-  onGenerateFromScript, onGenerateNarration, isGenerating,
+  onGenerateFromScript, onGenerateNarration, isGenerating, onLoadDemoClip, onLoadDemoVoiceover,
 }: {
   step: 1 | 2;
   onStepComplete: () => void;
@@ -144,10 +146,13 @@ function OnboardingModal({
   onGenerateFromScript: (script: string, voice: string) => Promise<void>;
   onGenerateNarration: (voice: string) => Promise<void>;
   isGenerating: boolean;
+  onLoadDemoClip: () => Promise<void>;
+  onLoadDemoVoiceover: () => Promise<void>;
 }) {
   const [voiceoverMethod, setVoiceoverMethod] = useState<VoiceoverMethod | null>(null);
   const [script, setScript] = useState('');
   const [selectedVoice, setSelectedVoice] = useState('Aoede');
+  const [isLoadingDemo, setIsLoadingDemo] = useState(false);
   const VOICES = ['Aoede', 'Charon', 'Fenrir', 'Kore', 'Puck'];
 
   const handleVoiceoverAction = async () => {
@@ -196,6 +201,20 @@ function OnboardingModal({
                   <p className="text-sm text-gray-500 mt-1">Add all the video clips you want to sync with a voiceover.</p>
                 </div>
                 <FileUploader label="Add Videos" accept={{ 'video/*': ['.mp4', '.mov', '.webm'] }} onFilesAdded={onVideoUpload} icon={<Upload className="w-6 h-6" />} />
+                <div className="flex items-center gap-3" aria-hidden="true">
+                  <div className="flex-1 h-px bg-gray-200" />
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">or</span>
+                  <div className="flex-1 h-px bg-gray-200" />
+                </div>
+                <button
+                  onClick={async () => { setIsLoadingDemo(true); await onLoadDemoClip(); setIsLoadingDemo(false); }}
+                  disabled={isLoadingDemo}
+                  className="w-full flex items-center justify-center gap-2 py-3 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 text-gray-700 font-semibold rounded-2xl transition-colors"
+                >
+                  {isLoadingDemo ? <Loader2 className="w-4 h-4 animate-spin" /> : <PlayCircle className="w-5 h-5" />}
+                  {isLoadingDemo ? 'Loading demo…' : 'Try the demo clip'}
+                </button>
+                <p className="text-xs text-gray-400 text-center -mt-2">An 8-second sample clip — no API keys needed.</p>
                 {videoClips.length > 0 && (
                   <div className="space-y-2 max-h-52 overflow-y-auto">
                     {videoClips.map(clip => (
@@ -250,6 +269,12 @@ function OnboardingModal({
                       <FileUploader label="Upload Voiceover" accept={{ 'audio/*': ['.mp3', '.wav', '.m4a'] }}
                         onFilesAdded={async (files) => { await onVoiceoverUpload(files); onStepComplete(); }}
                         multiple={false} icon={<Music className="w-5 h-5" />} />
+                      <button
+                        onClick={async () => { await onLoadDemoVoiceover(); onStepComplete(); }}
+                        className="mt-2 mx-auto flex items-center gap-1.5 text-xs font-medium text-gray-400 hover:text-violet-600 transition-colors"
+                      >
+                        <PlayCircle className="w-3.5 h-3.5" /> Use the demo audio instead
+                      </button>
                     </motion.div>
                   )}
                   {voiceoverMethod === 'script' && (
@@ -334,6 +359,8 @@ export default function App() {
   const [showStyleBible, setShowStyleBible] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [showModelPanel, setShowModelPanel] = useState(false);
+  // Frame captured from the playhead when the 3D panel opens — the input for image-to-3D generation.
+  const [modelFrameDataUrl, setModelFrameDataUrl] = useState<string | null>(null);
   const [showSurgeryPanel, setShowSurgeryPanel] = useState(false);
   const [surgeryAb, setSurgeryAb] = useState<'source' | 'segment'>('source');
   const segmentVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -344,7 +371,9 @@ export default function App() {
     () => (surgeryAb === 'segment' ? resolveSegmentSplice(appliedOps, frame.clip?.id ?? null, currentTime) : null),
     [surgeryAb, appliedOps, frame.clip?.id, currentTime],
   );
-  const [showApiKeyModal, setShowApiKeyModal] = useState(!hasApiKey());
+  // Keyless-first: the key manager never auto-opens — it stays reachable from
+  // the header key control and the inline Connect-provider cards open instead.
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [meshyKeyInput, setMeshyKeyInput] = useState('');
   const [tripoKeyInput, setTripoKeyInput] = useState('');
@@ -454,6 +483,31 @@ export default function App() {
       return { id: Math.random().toString(36).substr(2, 9), file, url, duration, startTime: 0, name: file.name };
     }));
     dispatch({ type: 'add-clips', clips: newClips });
+  };
+
+  // Bundled keyless demo: fetch the repo-shipped sample clip so a first run is
+  // instantly playable with zero API keys and zero local files.
+  const loadDemoClip = async () => {
+    const res = await fetch('/demo/syncro-demo.webm');
+    if (!res.ok) { console.error(`Demo clip fetch failed with ${res.status}`); return; }
+    const blob = await res.blob();
+    await handleVideoUpload([new File([blob], 'syncro-demo.webm', { type: 'video/webm' })]);
+  };
+
+  // Matching keyless demo audio for the voiceover track (same 8s duration).
+  const loadDemoVoiceover = async () => {
+    const res = await fetch('/demo/syncro-demo.wav');
+    if (!res.ok) { console.error(`Demo audio fetch failed with ${res.status}`); return; }
+    const blob = await res.blob();
+    await handleVoiceoverUpload([new File([blob], 'syncro-demo.wav', { type: 'audio/wav' })]);
+  };
+
+  // Captures the frame image-to-3D generation will use when the 3D panel opens.
+  // A failed capture just clears the frame — generation stays unavailable rather than crashing.
+  const captureFrameForModel = (hit: { clip: VideoClip; localTime: number }) => {
+    captureVideoFrame(hit.clip, hit.localTime)
+      .then(setModelFrameDataUrl)
+      .catch(() => setModelFrameDataUrl(null));
   };
 
   const handleVoiceoverUpload = async (files: File[]) => {
@@ -595,7 +649,7 @@ export default function App() {
   const editingClip = videoClips.find(c => c.id === editingClipId) ?? null;
 
   return (
-    <div className="min-h-screen bg-[#F5F5F7] text-gray-900 font-sans">
+    <div className="min-h-screen bg-app-base text-gray-900 font-sans">
       <AnimatePresence>
         {onboardingStep !== null && (
           <OnboardingModal
@@ -607,6 +661,8 @@ export default function App() {
             onGenerateFromScript={handleGenerateFromScript}
             onGenerateNarration={handleGenerateNarration}
             isGenerating={isGeneratingAudio}
+            onLoadDemoClip={loadDemoClip}
+            onLoadDemoVoiceover={loadDemoVoiceover}
           />
         )}
       </AnimatePresence>
@@ -646,7 +702,15 @@ export default function App() {
             <Activity className="w-3 h-3" /> Logs
           </button>
           <button
-            onClick={() => setShowModelPanel(true)}
+            onClick={() => {
+              const hit = getClipAtTime(editor.clips, currentTime);
+              if (hit) {
+                captureFrameForModel(hit);
+              } else {
+                setModelFrameDataUrl(null);
+              }
+              setShowModelPanel(true);
+            }}
             title="3D model editor"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors bg-gray-100 text-gray-500 hover:bg-gray-200"
           >
@@ -664,10 +728,10 @@ export default function App() {
           </button>
           <button
             onClick={() => { setApiKeyInput(''); setShowApiKeyModal(true); }}
-            title={hasApiKey() ? 'Change API keys' : 'Set API keys'}
+            title={hasApiKey() ? 'Change API keys' : 'API keys (optional — only needed for AI generation)'}
             className={cn(
               'p-2 rounded-full transition-colors',
-              hasApiKey() ? 'text-gray-400 hover:text-violet-600 hover:bg-violet-50' : 'text-amber-500 hover:text-amber-600 bg-amber-50 animate-pulse'
+              hasApiKey() ? 'text-gray-400 hover:text-violet-600 hover:bg-violet-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
             )}
           >
             <Key className="w-4 h-4" />
@@ -686,7 +750,8 @@ export default function App() {
         </div>
       </header>
 
-      <main className="p-6 max-w-[1600px] mx-auto grid grid-cols-12 gap-6">
+      {/* Desktop-first NLE: below ~1080px panels would crush, so scroll instead. */}
+      <main className="p-6 max-w-[1600px] mx-auto grid grid-cols-12 gap-6 min-w-[1080px]">
         <div className="col-span-3 space-y-5">
           <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
             <div className="px-5 py-4 border-b border-gray-50 flex items-center justify-between">
@@ -930,6 +995,7 @@ export default function App() {
       {showModelPanel && (
         <ModelPanel
           onClose={() => setShowModelPanel(false)}
+          frameDataUrl={modelFrameDataUrl}
           onPlace={(modelUrl, transform) => {
             // Place over the next 3s with a keyframed drift (right + slow yaw) —
             // the animation path is linearly interpolated by resolveModelPoseAt.
@@ -991,7 +1057,7 @@ export default function App() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 40 }}
               transition={{ type: 'spring', damping: 30, stiffness: 350 }}
-              className="relative h-full max-h-screen w-full max-w-xl bg-[#F5F5F7] border-l border-gray-200 shadow-2xl overflow-y-auto"
+              className="relative h-full max-h-screen w-full max-w-xl bg-panel border-l border-gray-200 shadow-2xl overflow-y-auto"
               onClick={e => e.stopPropagation()}
             >
               <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 bg-white/80 backdrop-blur-xl border-b border-gray-200">
