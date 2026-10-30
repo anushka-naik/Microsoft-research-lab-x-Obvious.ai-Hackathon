@@ -44,7 +44,7 @@ import {
   Undo2,
   Redo2,
 } from 'lucide-react';
-import { setApiKey, hasApiKey } from './services/apiKey';
+import { setApiKey, hasApiKey, getProviderKey, setProviderKey } from './services/apiKey';
 import {
   getMeshyApiKey,
   hasMeshyApiKey,
@@ -319,7 +319,32 @@ export default function App() {
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [meshyKeyInput, setMeshyKeyInput] = useState('');
   const [tripoKeyInput, setTripoKeyInput] = useState('');
+  const [falKeyInput, setFalKeyInput] = useState('');
+  const [replicateKeyInput, setReplicateKeyInput] = useState('');
+
+  // One save action persists every key field in the modal (Gemini, fal.ai,
+  // Replicate, Meshy, Tripo); the meshy/tripo store treats empty as cleared.
+  const saveApiKeys = () => {
+    if (apiKeyInput.trim()) setApiKey(apiKeyInput.trim());
+    if (falKeyInput.trim()) setProviderKey('fal', falKeyInput);
+    if (replicateKeyInput.trim()) setProviderKey('replicate', replicateKeyInput);
+    setMeshyApiKey(meshyKeyInput);
+    setTripoApiKey(tripoKeyInput);
+    setShowApiKeyModal(false);
+  };
   const videoRefs = useRef<Record<string, HTMLVideoElement>>({});
+
+  // Preload saved optional keys whenever the key modal opens (button or
+  // first-run auto-open), so a save re-persists exactly what the fields
+  // display — the stores clear a key when saved empty.
+  useEffect(() => {
+    if (showApiKeyModal) {
+      setFalKeyInput(getProviderKey('fal'));
+      setReplicateKeyInput(getProviderKey('replicate'));
+      setMeshyKeyInput(getMeshyApiKey());
+      setTripoKeyInput(getTripoApiKey());
+    }
+  }, [showApiKeyModal]);
   const [previewHeight, setPreviewHeight] = useState(260);
   const isResizingPreview = useRef(false);
   const resizeStartY = useRef(0);
@@ -550,8 +575,8 @@ export default function App() {
             <Activity className="w-3 h-3" /> Logs
           </button>
           <button
-            onClick={() => { setApiKeyInput(''); setMeshyKeyInput(getMeshyApiKey()); setTripoKeyInput(getTripoApiKey()); setShowApiKeyModal(true); }}
-            title={hasApiKey() ? 'Change Gemini API key' : 'Set Gemini API key (required)'}
+            onClick={() => { setApiKeyInput(''); setShowApiKeyModal(true); }}
+            title={hasApiKey() ? 'Change API keys' : 'Set API keys'}
             className={cn(
               'p-2 rounded-full transition-colors',
               hasApiKey() ? 'text-gray-400 hover:text-violet-600 hover:bg-violet-50' : 'text-amber-500 hover:text-amber-600 bg-amber-50 animate-pulse'
@@ -838,23 +863,41 @@ export default function App() {
                   <Key className="w-5 h-5 text-violet-600" />
                 </div>
                 <div>
-                  <h2 className="text-base font-bold text-gray-900">Gemini API Key</h2>
-                  <p className="text-xs text-gray-400">Required for AI features</p>
+                  <h2 className="text-base font-bold text-gray-900">API Keys</h2>
+                  <p className="text-xs text-gray-400">Stored only in your browser</p>
                 </div>
               </div>
               <p className="text-xs text-gray-500 mb-4">
-                Get your key from{' '}
+                Gemini (required) from{' '}
                 <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer"
                   className="text-violet-600 hover:underline font-medium">aistudio.google.com</a>.
-                It's stored only in your browser.
+                fal.ai (optional) powers object removal — get one from{' '}
+                <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noreferrer"
+                  className="text-violet-600 hover:underline font-medium">fal.ai/dashboard/keys</a>.
               </p>
               <input
                 type="password"
                 value={apiKeyInput}
                 onChange={e => setApiKeyInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && apiKeyInput.trim()) { setApiKey(apiKeyInput.trim()); setShowApiKeyModal(false); } }}
+                onKeyDown={e => { if (e.key === 'Enter' && apiKeyInput.trim()) saveApiKeys(); }}
                 placeholder="AIza…"
                 autoFocus
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent mb-3 font-mono"
+              />
+              <input
+                type="password"
+                value={falKeyInput}
+                onChange={e => setFalKeyInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && apiKeyInput.trim()) saveApiKeys(); }}
+                placeholder="fal.ai key (optional) — e.g. key_id:key_secret"
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent mb-3 font-mono"
+              />
+              <input
+                type="password"
+                value={replicateKeyInput}
+                onChange={e => setReplicateKeyInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && apiKeyInput.trim()) saveApiKeys(); }}
+                placeholder="Replicate token (optional) — r8_…"
                 className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent mb-4 font-mono"
               />
               <div className="flex gap-3">
@@ -867,11 +910,11 @@ export default function App() {
                   </button>
                 )}
                 <button
-                  onClick={() => { if (apiKeyInput.trim()) { setApiKey(apiKeyInput.trim()); setShowApiKeyModal(false); } }}
-                  disabled={!apiKeyInput.trim()}
+                  onClick={saveApiKeys}
+                  disabled={!apiKeyInput.trim() && !falKeyInput.trim() && !replicateKeyInput.trim() && !meshyKeyInput.trim() && !tripoKeyInput.trim()}
                   className="flex-1 px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 disabled:bg-gray-200 disabled:text-gray-400 text-white text-sm font-semibold transition-colors shadow shadow-violet-200"
                 >
-                  Save Key
+                  Save Keys
                 </button>
               </div>
 
@@ -901,12 +944,6 @@ export default function App() {
                     className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent font-mono"
                   />
                 </div>
-                <button
-                  onClick={() => { setMeshyApiKey(meshyKeyInput); setTripoApiKey(tripoKeyInput); setShowApiKeyModal(false); }}
-                  className="w-full px-4 py-2.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm font-semibold transition-colors"
-                >
-                  Save provider keys
-                </button>
               </div>
             </motion.div>
           </div>
