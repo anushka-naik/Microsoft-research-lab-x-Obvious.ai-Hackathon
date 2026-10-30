@@ -24,6 +24,7 @@ import { VideoClip, Voiceover, CaptionStyle, CaptionMode, VideoDescription, Thum
 import { generateDescription, identifyKeyMoments } from '../services/postProcessing';
 import { generateSRT, generateVTT, downloadTextFile, downloadBlob } from '../utils/captionUtils';
 import { captureVideoFrame, addQuoteOverlay, downloadDataUrl, downloadFile, getClipAtTime } from '../utils/exportUtils';
+import { EditOp, applyOpsAtTime } from '../state/editOps';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -621,11 +622,13 @@ function ThumbnailsTab({ voiceover, videoClips }: { voiceover: Voiceover; videoC
 function ExportTab({
   voiceover,
   videoClips,
+  ops,
   captionStyle,
   captionsEnabled,
 }: {
   voiceover: Voiceover | null;
   videoClips: VideoClip[];
+  ops: EditOp[];
   captionStyle: CaptionStyle;
   captionsEnabled: boolean;
 }) {
@@ -730,17 +733,47 @@ function ExportTab({
           return;
         }
 
-        // Find active clip
-        const hit = getClipAtTime(videoClips, elapsed);
+        // Compose this frame through the SAME op pipeline the preview uses.
+        const frame = applyOpsAtTime(videoClips, ops, elapsed, { loop: false });
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 0, W, H);
-        if (hit) {
-          const v = renderVids[hit.clip.id];
+
+        const wipe = frame.transition && frame.transition.type === 'wipe' ? frame.transition : null;
+        if (frame.underClip && wipe) {
+          // Outgoing layer stays fully visible beneath the wipe reveal.
+          const v = renderVids[frame.underClip.id];
           if (v) {
-            // Seek if drifted; play (muted) so frames decode
-            if (Math.abs(v.currentTime - hit.localTime) > 0.2) v.currentTime = hit.localTime;
+            if (Math.abs(v.currentTime - frame.underSourceOffset) > 0.2) v.currentTime = frame.underSourceOffset;
             if (v.paused) v.play().catch(() => {});
             try { drawContained(ctx, v, W, H); } catch { /* skip */ }
+          }
+        }
+        if (frame.clip) {
+          const v = renderVids[frame.clip.id];
+          if (v) {
+            if (Math.abs(v.currentTime - frame.sourceOffset) > 0.2) v.currentTime = frame.sourceOffset;
+            if (v.paused) v.play().catch(() => {});
+            try {
+              ctx.save();
+              if (wipe) {
+                const revealW = W * wipe.progress;
+                ctx.beginPath();
+                ctx.rect(0, 0, revealW, H);
+                ctx.clip();
+              } else {
+                ctx.globalAlpha = frame.opacity;
+              }
+              drawContained(ctx, v, W, H);
+            } catch { /* skip */ } finally {
+              ctx.restore();
+            }
+          }
+        }
+
+        // Burn journaled text-overlay ops — the export is no longer a lossy preview.
+        for (const drawOp of frame.drawOps) {
+          if (drawOp.kind === 'text-overlay' && drawOp.text) {
+            drawTextOverlayOnCanvas(ctx, W, H, drawOp.text);
           }
         }
 
@@ -957,6 +990,60 @@ function drawContained(
   ctx.drawImage(v, (W - dW) / 2, (H - dH) / 2, dW, dH);
 }
 
+// ── Canvas text-overlay renderer (matches the preview's bottom-center pill) ──
+function drawTextOverlayOnCanvas(
+  ctx: CanvasRenderingContext2D,
+  W: number,
+  H: number,
+  text: string
+) {
+  const fontSize = Math.max(14, Math.round(W * 0.022));
+  ctx.save();
+  ctx.font = `600 ${fontSize}px Inter, Arial, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  const maxW = W * 0.75;
+  const words = text.split(' ').filter(Boolean);
+  if (words.length === 0) { ctx.restore(); return; }
+  const lines: string[] = [];
+  let cur = '';
+  for (const w of words) {
+    const test = cur ? `${cur} ${w}` : w;
+    if (ctx.measureText(test).width > maxW && cur) { lines.push(cur); cur = w; } else cur = test;
+  }
+  if (cur) lines.push(cur);
+
+  const padX = fontSize * 1.1;
+  const padY = fontSize * 0.62;
+  const lh = fontSize * 1.35;
+  const blockH = lines.length * lh + padY * 2 - (lh - fontSize);
+  const boxBottom = H - Math.round(H * 0.075); // matches preview's bottom-6
+  const boxTop = boxBottom - blockH;
+
+  const widest = Math.max(...lines.map(l => ctx.measureText(l).width));
+  const boxW = Math.min(maxW + padX * 2, widest + padX * 2);
+  const boxX = (W - boxW) / 2;
+
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+  const r = 12;
+  const x = boxX, y = boxTop, w = boxW, h = blockH;
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = '#ffffff';
+  lines.forEach((line, i) => {
+    ctx.fillText(line, W / 2, boxTop + padY + lh * i + lh / 2, maxW);
+  });
+  ctx.restore();
+}
+
 // ── Canvas caption renderer (used during video export recording) ────────────
 function drawCaptionOnCanvas(
   ctx: CanvasRenderingContext2D,
@@ -1010,6 +1097,7 @@ type Tab = 'description' | 'captions' | 'thumbnails' | 'export';
 interface PostProcessingPanelProps {
   voiceover: Voiceover | null;
   videoClips: VideoClip[];
+  ops: EditOp[];
   currentTime: number;
   captionStyle: CaptionStyle;
   captionsEnabled: boolean;
@@ -1020,6 +1108,7 @@ interface PostProcessingPanelProps {
 export function PostProcessingPanel({
   voiceover,
   videoClips,
+  ops,
   captionStyle,
   captionsEnabled,
   onCaptionStyleChange,
@@ -1120,6 +1209,7 @@ export function PostProcessingPanel({
             <ExportTab
               voiceover={voiceover}
               videoClips={videoClips}
+              ops={ops}
               captionStyle={captionStyle}
               captionsEnabled={captionsEnabled}
             />

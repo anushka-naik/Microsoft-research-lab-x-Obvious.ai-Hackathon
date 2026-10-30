@@ -134,27 +134,54 @@ export function downloadFile(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
-/** Determine which clip (and its local time) is active at a given global timeline time. */
+/** Effective playback duration after trims (trimmedDuration wins; falls back to full duration). */
+export function effectiveClipDuration(clip: Pick<VideoClip, 'duration' | 'trimmedDuration'>): number {
+  return clip.trimmedDuration ?? clip.duration;
+}
+
+export interface ClipLookupOptions {
+  /** When true (default), times beyond the last clip wrap to the start — the export loop keeps footage under a longer voiceover. The live preview opts out and holds instead. */
+  loop?: boolean;
+}
+
+/**
+ * Determine which clip (and its source-file offset) is active at a given
+ * global timeline time. Respects trimStart/trimmedDuration: the lookup window
+ * is the clip's effective duration, and the returned localTime points into the
+ * original file (trimStart applied) so seeks land on the trimmed range.
+ */
 export function getClipAtTime(
   clips: VideoClip[],
-  time: number
+  time: number,
+  options: ClipLookupOptions = {}
 ): { clip: VideoClip; localTime: number } | null {
+  const { loop = true } = options;
   if (clips.length === 0) return null;
   const sorted = [...clips]
-    .filter(c => c.duration > 0)
+    .filter(c => effectiveClipDuration(c) > 0)
     .sort((a, b) => a.startTime - b.startTime);
   if (sorted.length === 0) return null;
 
-  const covering = sorted.find(c => time >= c.startTime && time < c.startTime + c.duration);
-  if (covering) return { clip: covering, localTime: time - covering.startTime };
+  const covering = sorted.find(c => {
+    const end = c.startTime + effectiveClipDuration(c);
+    return time >= c.startTime && time < end;
+  });
+  if (covering) {
+    return { clip: covering, localTime: (time - covering.startTime) + (covering.trimStart ?? 0) };
+  }
 
-  const total = sorted.reduce((s, c) => s + c.duration, 0);
+  if (!loop) return null;
+
+  const total = sorted.reduce((s, c) => s + effectiveClipDuration(c), 0);
   if (total <= 0) return null;
   const looped = time % total;
   let acc = 0;
   for (const c of sorted) {
-    if (looped >= acc && looped < acc + c.duration) return { clip: c, localTime: looped - acc };
-    acc += c.duration;
+    const eff = effectiveClipDuration(c);
+    if (looped >= acc && looped < acc + eff) {
+      return { clip: c, localTime: (looped - acc) + (c.trimStart ?? 0) };
+    }
+    acc += eff;
   }
   return null;
 }
