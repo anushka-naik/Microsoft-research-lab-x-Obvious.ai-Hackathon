@@ -2,11 +2,12 @@
 // localStorage and are sent directly from the client to each provider — the
 // same model the app already uses for Gemini.
 
-export type ProviderId = 'gemini' | 'fal' | 'replicate';
+export type ProviderId = 'gemini' | 'groq' | 'fal' | 'replicate';
 
 /** Stable storage keys. `gemini` keeps its legacy name so existing keys survive the update. */
 const STORAGE_KEYS: Record<ProviderId, string> = {
   gemini: 'syncro_gemini_api_key',
+  groq: 'syncro_groq_api_key',
   fal: 'syncro_fal_api_key',
   replicate: 'syncro_replicate_api_token',
 };

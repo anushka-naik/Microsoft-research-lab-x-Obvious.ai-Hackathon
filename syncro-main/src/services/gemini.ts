@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type, FileState } from "@google/genai";
 import { startLog, finishLog } from "./logger";
+import { selectLlmProvider, generateStyleBibleViaGroq } from "./llmProvider";
 import { getApiKey } from "./apiKey";
 import { parseStyleBible } from "./styleBible";
 import type { StyleBible } from "../state/editOps";
@@ -303,6 +304,12 @@ Return a JSON array with one object per position, each containing:
  * structurally invalid response throws so the UI can offer a retry.
  */
 export async function generateStyleBible(description: string, referenceFile?: File): Promise<StyleBible> {
+  // Call-time provider routing: Gemini stays the default while its key is
+  // configured; Groq is the free fallback used only without a Gemini key. No
+  // key at all falls through to the Gemini path's existing graceful error.
+  if (selectLlmProvider() === 'groq') {
+    return generateStyleBibleViaGroq(description, referenceFile);
+  }
   const MODEL = 'gemini-2.5-flash-lite';
   const context = referenceFile ? ` | reference: ${referenceFile.name}` : '';
   const log = startLog('Generate Style Bible', MODEL, `"${description.slice(0, 80)}${description.length > 80 ? '…' : ''}"${context}`);
