@@ -1,1 +1,133 @@
 @import "tailwindcss";
+
+/*
+ * Syncro design tokens — unified dark NLE theme.
+ *
+ * The app's components were styled with light-theme utilities (bg-white,
+ * bg-gray-50, text-gray-900, …) over a dark violet body. Rather than churning
+ * every component file, this layer remaps Tailwind's palette tokens onto a
+ * violet-tinted dark scale, so every existing utility renders the dark theme
+ * coherently. Three text utilities are explicitly re-lighted below because
+ * their tokens are shared with dark background usages (bg-gray-800/900,
+ * bg-white panels).
+ *
+ * Semantic names for NEW styling work (use these, not the raw scale):
+ *   surfaces  --color-app-base  app background
+ *   --color-panel    panel surface   --color-surface-raised  raised surface
+ *   --color-surface-control  controls  --color-border-strong  strong borders
+ *   --color-ink / --color-ink-secondary / --color-ink-muted  text
+ */
+
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  /* Accent lift: violet tuned for dark panels (bg + text both stay legible). */
+  --color-violet-300: #6d5ab8;
+  --color-violet-600: #8f5cf7;
+  --color-violet-700: #7c3aed;
+
+  /* Legacy light scale → dark NLE scale (violet-tinted, hue ~262). */
+  --color-white: #221b33; /* panel surface */
+  --color-gray-50: #271f3b; /* raised surface / inputs */
+  --color-gray-100: #2e2544; /* control surface */
+  --color-gray-200: #382d52; /* solid controls, subtle borders */
+  --color-gray-300: #453965; /* ticks, stronger borders */
+  --color-gray-400: #504270; /* strongest borders */
+  --color-gray-500: #8d81ab; /* muted text */
+  --color-gray-600: #a296c0; /* secondary text */
+  --color-gray-700: #beb3d8; /* body text */
+  --color-gray-800: #0f0b17; /* (bg use) darkest tile — text remapped below */
+  --color-gray-900: #0f0b17; /* (bg use) video preview backdrop — text remapped below */
+
+  --color-zinc-50: #261e39;
+  --color-zinc-100: #2c2440;
+  --color-zinc-200: #352b4d;
+  --color-zinc-300: #423659;
+  --color-zinc-400: #7d729a;
+  --color-zinc-500: #948aae;
+  --color-zinc-600: #a99fc4;
+  --color-zinc-700: #c3bad9;
+  --color-zinc-800: #d8d1ea;
+
+  /* Semantic tokens for new work. */
+  --color-app-base: #141019;
+  --color-panel: #221b33;
+  --color-surface-raised: #271f3b;
+  --color-surface-control: #2e2544;
+  --color-border-strong: #453965;
+  --color-ink: #ece7f8;
+  --color-ink-secondary: #beb3d8;
+  --color-ink-muted: #8d81ab;
+  --color-ink-faint: #665c80;
+  --color-accent: #8f5cf7;
+  --color-accent-hover: #a78bfa;
+}
+
+/*
+ * Text utilities whose theme tokens are shared with dark background usages:
+ * restore them to light ink. Unlayered so they beat Tailwind's utility layer.
+ */
+.text-white { color: #f5f2fc; }
+.text-gray-900 { color: #ece7f8; }
+.text-gray-800 { color: #ddd5ee; }
+.hover\:text-gray-800:hover { color: #ece7f8; }
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: var(--color-app-base);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+    color: #f5f2fc;
+  }
+
+  /* Thin dark scrollbars, NLE-style. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-gray-300) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--color-gray-300);
+    border-radius: 4px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--color-gray-400);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+  }
+}
+
+@layer components {
+  /* Panel chrome for new feature panels (Style Bible, 3D editor, surgery). */
+  .panel {
+    background-color: var(--color-panel);
+    border-radius: var(--radius-xl, 1rem);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem;
+  }
+}
