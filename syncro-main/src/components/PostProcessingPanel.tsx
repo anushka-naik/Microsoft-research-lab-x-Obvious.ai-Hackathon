@@ -27,6 +27,8 @@ import { captureVideoFrame, addQuoteOverlay, downloadDataUrl, downloadFile, getC
 import { EditOp, applyOpsAtTime } from '../state/editOps';
 import type { StyleBible } from '../state/editOps';
 import { resolveGradeAtTime, gradeToCssFilter } from '../state/styleGrade';
+import { resolveModelDrawAt } from '../utils/overlayModel';
+import type { CompositorHandle } from './modelCompositor';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -725,6 +727,29 @@ function ExportTab({
       const sorted = [...videoClips].sort((a, b) => a.startTime - b.startTime);
       const totalClipDur = sorted.reduce((s, c) => s + c.duration, 0);
 
+      // Pre-load 3D models for overlay-model ops — the draw loop is synchronous.
+      let modelCompositor: CompositorHandle | null = null;
+      const overlayModelOps = ops.filter(
+        (o): o is Extract<EditOp, { type: 'overlay-model' }> =>
+          o.type === 'overlay-model' && o.status !== 'failed'
+      );
+      if (overlayModelOps.length > 0) {
+        try {
+          const { createModelCompositor } = await import('./modelCompositor');
+          modelCompositor = await createModelCompositor();
+          for (const mOp of overlayModelOps) {
+            if (mOp.params.modelUrl) {
+              await modelCompositor
+                .loadModel(mOp.params.modelUrl)
+                .catch((e) => console.error('[export] 3D model failed to load:', mOp.params.modelUrl, e));
+            }
+          }
+        } catch (e) {
+          console.error('[export] 3D compositing unavailable:', e);
+          modelCompositor = null;
+        }
+      }
+
       let rafId: number;
       const draw = () => {
         const elapsed = (performance.now() - startWall) / 1000;
@@ -778,6 +803,18 @@ function ExportTab({
           }
         }
 
+        // Burn journaled draw ops — 3D models over footage, grade over models, text over all.
+        for (const drawOp of frame.drawOps) {
+          if (drawOp.kind === 'overlay-model' && modelCompositor) {
+            const mOp = ops.find((o) => o.id === drawOp.opId);
+            if (mOp && mOp.type === 'overlay-model') {
+              const pose = resolveModelDrawAt(mOp, elapsed, W, H);
+              modelCompositor.renderAt(pose);
+              ctx.drawImage(modelCompositor.canvas, pose.rect.dx, pose.rect.dy, pose.rect.dw, pose.rect.dh);
+            }
+          }
+        }
+
         // Vignette — same grade value the preview draws as an inset box-shadow.
         drawVignetteOnCanvas(ctx, W, H, grade?.grade.vignette ?? 0);
 
@@ -801,6 +838,8 @@ function ExportTab({
         recorder.stop();
         audioEl.pause();
         cancelAnimationFrame(rafId);
+        modelCompositor?.dispose();
+        modelCompositor = null;
         Object.values(renderVids).forEach(v => { v.pause(); v.remove(); });
         setIsExporting(false);
         setExportProgress(0);

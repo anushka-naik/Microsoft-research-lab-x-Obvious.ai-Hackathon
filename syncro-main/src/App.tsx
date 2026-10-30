@@ -14,6 +14,8 @@ import { ModelPanel } from './components/ModelPanel';
 import { ObjectSurgeryPanel } from './components/ObjectSurgeryPanel';
 import { resolveGradeAtTime, gradeToCssFilter } from './state/styleGrade';
 import { styleBibleToPromptContext } from './services/styleBible';
+import { ModelOverlay } from './components/ModelOverlay';
+import { createOverlayModelOp } from './utils/overlayModel';
 import { FileUploader } from './components/FileUploader';
 import { Timeline } from './components/Timeline';
 import { ClipEditor } from './components/ClipEditor';
@@ -866,7 +868,9 @@ export default function App() {
                 </div>
               ) : null;
             })()}
-            {/* Vignette — the same grade value the export loop draws as a radial gradient */}
+            <ModelOverlay drawOps={frame.drawOps} ops={editor.ops} currentTime={currentTime} />
+            {/* Vignette — the same grade value the export loop draws as a radial gradient.
+                Painted after ModelOverlay so placed models are graded by the Style Bible. */}
             {activeGrade && activeGrade.grade.vignette > 0 && (
               <div
                 className="absolute inset-0 pointer-events-none"
@@ -921,7 +925,38 @@ export default function App() {
       )}
 
       {showLogs && <LogPanel onClose={() => setShowLogs(false)} />}
-      {showModelPanel && <ModelPanel onClose={() => setShowModelPanel(false)} />}
+      {showModelPanel && (
+        <ModelPanel
+          onClose={() => setShowModelPanel(false)}
+          onPlace={(modelUrl, transform) => {
+            // Place over the next 3s with a keyframed drift (right + slow yaw) —
+            // the animation path is linearly interpolated by resolveModelPoseAt.
+            const inSec = currentTime;
+            const outSec = currentTime + 3;
+            const pos = {
+              x: Math.max(-1, Math.min(1, transform.position[0] / 2)),
+              y: Math.max(-1, Math.min(1, transform.position[1] / 2)),
+            };
+            dispatch({
+              type: 'commit-op',
+              op: createOverlayModelOp({
+                clipId: editor.clips[0]?.id ?? '',
+                inSec,
+                outSec,
+                modelUrl,
+                position: pos,
+                scale: transform.scale,
+                rotationYDeg: transform.rotationDeg[1],
+                keyframes: [
+                  { tSec: inSec, position: pos, scale: transform.scale, rotationYDeg: transform.rotationDeg[1] },
+                  { tSec: outSec, position: { x: Math.min(1, pos.x + 0.4), y: pos.y }, scale: transform.scale, rotationYDeg: transform.rotationDeg[1] + 25 },
+                ],
+              }),
+            });
+            setShowModelPanel(false);
+          }}
+        />
+      )}
       {showSurgeryPanel && (
         <ObjectSurgeryPanel
           clip={frame.clip}

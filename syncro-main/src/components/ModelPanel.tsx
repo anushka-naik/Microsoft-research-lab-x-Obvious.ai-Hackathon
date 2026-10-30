@@ -10,12 +10,15 @@ import {
   type Vec3,
 } from '../utils/modelTransform';
 import type { ViewerHandle } from './modelViewer';
+import { createDemoGlbUrl } from './modelCompositor';
 
 interface ModelPanelProps {
   onClose: () => void;
   /** Provider-generated GLB to open automatically (op pipeline wires this later). */
   glbUrl?: string | null;
   glbName?: string;
+  /** Place the currently loaded model onto the timeline as an overlay-model op. */
+  onPlace?: (modelUrl: string, transform: ModelTransform) => void;
 }
 
 const POS_RANGE = { min: -3, max: 3, step: 0.05 };
@@ -59,7 +62,7 @@ function AxisSlider({
   );
 }
 
-export function ModelPanel({ onClose, glbUrl, glbName }: ModelPanelProps) {
+export function ModelPanel({ onClose, glbUrl, glbName, onPlace }: ModelPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewerRef = useRef<ViewerHandle | null>(null);
   const [ready, setReady] = useState(false);
@@ -205,6 +208,31 @@ export function ModelPanel({ onClose, glbUrl, glbName }: ModelPanelProps) {
             >
               Load demo object
             </button>
+            <button
+              onClick={() => {
+                void (async () => {
+                  try {
+                    const url = await createDemoGlbUrl();
+                    await loadFromUrl(url, 'mock-model.glb');
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : 'Mock generation failed');
+                  }
+                })();
+              }}
+              className="px-3 py-1.5 rounded-full text-xs font-medium bg-violet-100 text-violet-600 hover:bg-violet-200"
+              title="Keyless mock of the image-to-3D provider — generates a procedural GLB"
+            >
+              Generate model (mock)
+            </button>
+            {onPlace && hasModel && downloadUrl ? (
+              <button
+                onClick={() => onPlace(downloadUrl, transform)}
+                className="px-3 py-1.5 rounded-full text-xs font-medium bg-violet-600 hover:bg-violet-700 text-white"
+                title="Place this model over the next 3 seconds of the timeline, drifting right with a slow yaw"
+              >
+                Place in video (3s)
+              </button>
+            ) : null}
             {downloadUrl && hasModel ? (
               <a
                 href={downloadUrl}
