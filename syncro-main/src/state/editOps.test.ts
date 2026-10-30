@@ -69,6 +69,28 @@ describe('resolveClips', () => {
     expect(resolved[0].trimStart).toBeUndefined();
     expect(resolved[0].trimmedDuration).toBeUndefined();
   });
+
+  it('a left trim repositions the clip via its startTime param', () => {
+    const source = makeClip();
+    const win = clipActiveWindow(source);
+    // Dragging the left edge in by 2.92s both trims the head and moves the clip.
+    const resolved = resolveClips([source], [createTrimOp(source.id, 2.92, 8, { trimStart: 2.92, trimmedDuration: 5.08, startTime: 2.92 })]);
+    expect(resolved[0]).toMatchObject({ startTime: 2.92, trimStart: 2.92, trimmedDuration: 5.08 });
+  });
+
+  it('a trim op without startTime leaves the clip position alone', () => {
+    const source = makeClip();
+    const win = clipActiveWindow(source);
+    const resolved = resolveClips([source], [createTrimOp(source.id, win.inSec, win.outSec, { trimStart: 1, trimmedDuration: 7 })]);
+    expect(resolved[0].startTime).toBe(source.startTime);
+  });
+
+  it('clipActiveWindow respects a left trim when trimmedDuration is absent', () => {
+    const source = makeClip(); // duration 10
+    const leftTrimmed: VideoClip = { ...source, trimStart: 2 };
+    const win = clipActiveWindow(leftTrimmed);
+    expect(win.outSec - win.inSec).toBe(8);
+  });
 });
 
 describe('applyOpsAtTime', () => {
