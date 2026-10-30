@@ -7,6 +7,8 @@ import {
   applyOpsAtTime,
   clipActiveWindow,
   createMoveOp,
+  createObjectInsertOp,
+  createObjectRemoveOp,
   createTextOverlayOp,
   createTransitionOp,
   createTrimOp,
@@ -301,5 +303,44 @@ describe('editorReducer', () => {
     expect(next.ops).toHaveLength(1);
     expect(next.clips[0].trimStart).toBe(2);
     expect(next.clips[0].analysis).toBe('A cat walks');
+  });
+});
+
+// ── Generative op factories ─────────────────────────────────────────────────────────
+
+describe('generative op factories', () => {
+  it('createObjectRemoveOp produces a draft op carrying its params', () => {
+    const op = createObjectRemoveOp('clip-1', 3, 7, { point: { x: 100, y: 80 }, backgroundPrompt: 'empty road' });
+    expect(op.type).toBe('object-remove');
+    expect(op.status).toBe('draft');
+    expect(op.clipId).toBe('clip-1');
+    expect(op.inSec).toBe(3);
+    expect(op.outSec).toBe(7);
+    expect(op.params.point).toEqual({ x: 100, y: 80 });
+    expect(op.params.backgroundPrompt).toBe('empty road');
+  });
+
+  it('createObjectInsertOp produces a draft op carrying its description', () => {
+    const op = createObjectInsertOp('clip-1', 1, 2, { description: 'red balloon', point: { x: 5, y: 5 } });
+    expect(op.type).toBe('object-insert');
+    expect(op.status).toBe('draft');
+    expect(op.params.description).toBe('red balloon');
+  });
+
+  it('draft generative ops never render: applyOpsAtTime emits no drawOps for them', () => {
+    const draft = createObjectRemoveOp('clip-1', 3, 7, { point: { x: 1, y: 1 } });
+    const frame = applyOpsAtTime([makeClip()], [draft], 5);
+    expect(frame.clip).not.toBeNull();
+    expect(frame.drawOps).toHaveLength(0);
+  });
+
+  it('an applied generative op folds into drawOps only inside its window', () => {
+    const draft = createObjectRemoveOp('clip-1', 3, 7, { point: { x: 1, y: 1 } });
+    const applied = { ...draft, status: 'applied' as const, resultUrl: 'blob:seg' };
+    const inside = applyOpsAtTime([makeClip()], [applied], 5);
+    expect(inside.drawOps).toHaveLength(1);
+    expect(inside.drawOps[0]).toMatchObject({ kind: 'object-remove', opId: applied.id, resultUrl: 'blob:seg' });
+    const outside = applyOpsAtTime([makeClip()], [applied], 8);
+    expect(outside.drawOps).toHaveLength(0);
   });
 });

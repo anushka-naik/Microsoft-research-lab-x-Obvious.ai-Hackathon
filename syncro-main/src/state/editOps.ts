@@ -20,7 +20,8 @@ export type TrimOpParams = { trimStart: number; trimmedDuration?: number; startT
 export type MoveOpParams = { startTime: number; track: number };
 export type TransitionOpParams = { transitionIn: TransitionType };
 export type TextOverlayOpParams = { text: string };
-export interface ObjectRemoveOpParams { point?: { x: number; y: number }; maskDataUrl?: string }
+/** Optional description of the desired background after removal — passed to provider-side mask generation and the Gemini fallback prompt. */
+export interface ObjectRemoveOpParams { point?: { x: number; y: number }; maskDataUrl?: string; backgroundPrompt?: string }
 export interface ObjectInsertOpParams { description: string; point?: { x: number; y: number } }
 export interface OverlayModelOpParams {
   modelUrl: string;
@@ -155,6 +156,18 @@ export function createTransitionOp(clipId: string, inSec: number, outSec: number
 
 export function createTextOverlayOp(clipId: string, inSec: number, outSec: number, params: TextOverlayOpParams): TextOverlayOp {
   return { ...baseOp(clipId, inSec, outSec), type: 'text-overlay', params };
+}
+
+// Generative ops start as drafts: the pipeline pre-renders the replacement
+// segment, then the dispatcher sets status 'applied' + resultUrl. Drafts never
+// render (resolveSegmentSplice and applyOpsAtTime skip non-applied ops), so a
+// failed or in-flight generation leaves the source playing through untouched.
+export function createObjectRemoveOp(clipId: string, inSec: number, outSec: number, params: ObjectRemoveOpParams): ObjectRemoveOp {
+  return { ...baseOp(clipId, inSec, outSec), type: 'object-remove', params, status: 'draft' };
+}
+
+export function createObjectInsertOp(clipId: string, inSec: number, outSec: number, params: ObjectInsertOpParams): ObjectInsertOp {
+  return { ...baseOp(clipId, inSec, outSec), type: 'object-insert', params, status: 'draft' };
 }
 
 // ── Op resolution ────────────────────────────────────────────────────────────
