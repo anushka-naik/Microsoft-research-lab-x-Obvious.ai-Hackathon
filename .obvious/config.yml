@@ -1,0 +1,11 @@
+# Obvious repo policy — defaults. The next setup run should auto-detect
+# merge method and review requirements from GitHub repo settings.
+branch:
+  base: main
+  prefix: obvious/
+merge:
+  method: merge
+  requireHumanMerge: true
+onboarding:
+  stackHealthy: false
+  snapshotId: null
